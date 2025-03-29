@@ -150,20 +150,21 @@ impl FileDescriptor {
     }
     pub fn get_statx(&self, mask: u32) -> Statx {
         let stat = self.file.get_stat();
-        Statx::new(
-            mask,
-            stat.get_nlink(),
-            stat.get_mode() as u16,
-            stat.get_ino() as u64,
-            stat.get_size() as u64,
-            stat.get_atime() as i64,
-            stat.get_ctime() as i64,
-            stat.get_mtime() as i64,
-            (stat.get_rdev() & 0xffff_00) >> 8 as u32,
-            (stat.get_rdev() & 0xff) as u32,
-            (stat.get_dev() & 0xffff_00) >> 8 as u32,
-            (stat.get_dev() & 0xff) as u32,
-        )
+        Statx::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        // Statx::new(
+        //     mask,
+        //     stat.get_nlink(),
+        //     stat.get_mode() as u16,
+        //     stat.get_ino() as u64,
+        //     stat.get_size() as u64,
+        //     stat.get_atime() as i64,
+        //     stat.get_ctime() as i64,
+        //     stat.get_mtime() as i64,
+        //     (stat.get_rdev() & 0xffff_00) >> 8 as u32,
+        //     (stat.get_rdev() & 0xff) as u32,
+        //     (stat.get_dev() & 0xffff_00) >> 8 as u32,
+        //     (stat.get_dev() & 0xff) as u32,
+        // )
     }
     pub fn open(&self, path: &str, flags: OpenFlags, special_use: bool) -> Result<Self, isize> {
         if path == "" {

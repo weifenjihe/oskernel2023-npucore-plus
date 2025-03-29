@@ -164,47 +164,47 @@ void ext4_user_free(void *p)
 	}
 }
 
-void *ext4_user_realloc(void *p, size_t size)
-{
-	size_t s;
-	t_block b, new;
-	void *newp;
+// void *ext4_user_realloc(void *p, size_t size)
+// {
+// 	size_t s;
+// 	t_block b, new;
+// 	void *newp;
 
-	if (!p)
-		return ext4_user_malloc(size);
-	if (user_valid_addr(p)) {
-		s = ALIGN4_HI(size);
-		b = get_block(p); // 得到对应的block
-		if (b->size >= s) // 如果size变小了，考虑split
-		{
-			if (b->size - s >= (EXT4_USER_BLOCK_SIZE + 4))
-				split_block(b, s);
-		} else // 如果当前block的数据区不能满足size
-		{
-			// 如果后继block是free的，并且合并后大小满足size，考虑合并
-			if (b->next && b->next->free &&
-			    (b->size + EXT4_USER_BLOCK_SIZE + b->next->size) >=
-				s) {
-				user_fusion(b);
-				// 合并后满足size，再看能不能split
-				if (b->size - s >= (EXT4_USER_BLOCK_SIZE + 4))
-					user_split_block(b, s);
-			} else // 以上都不满足，则malloc新区域
-			{
-				newp = ext4_user_malloc(s);
-				if (!newp)
-					return NULL;
-				// 内存复制
-				new = user_get_block(newp);
-				user_copy_block(b, new);
-				ext4_user_free(p); // 释放old
-				return newp;
-			}
-		}
-		return p; // 当前block数据区大于size时
-	}
-	return NULL;
-}
+// 	if (!p)
+// 		return ext4_user_malloc(size);
+// 	if (user_valid_addr(p)) {
+// 		s = ALIGN4_HI(size);
+// 		b = get_block(p); // 得到对应的block
+// 		if (b->size >= s) // 如果size变小了，考虑split
+// 		{
+// 			if (b->size - s >= (EXT4_USER_BLOCK_SIZE + 4))
+// 			user_split_block(b, s);
+// 		} else // 如果当前block的数据区不能满足size
+// 		{
+// 			// 如果后继block是free的，并且合并后大小满足size，考虑合并
+// 			if (b->next && b->next->free &&
+// 			    (b->size + EXT4_USER_BLOCK_SIZE + b->next->size) >=
+// 				s) {
+// 				user_fusion(b);
+// 				// 合并后满足size，再看能不能split
+// 				if (b->size - s >= (EXT4_USER_BLOCK_SIZE + 4))
+// 					user_split_block(b, s);
+// 			} else // 以上都不满足，则malloc新区域
+// 			{
+// 				newp = ext4_user_malloc(s);
+// 				if (!newp)
+// 					return NULL;
+// 				// 内存复制
+// 				new = user_get_block(newp);
+// 				user_copy_block(b, new);
+// 				ext4_user_free(p); // 释放old
+// 				return newp;
+// 			}
+// 		}
+// 		return p; // 当前block数据区大于size时
+// 	}
+// 	return NULL;
+// }
 
 size_t strlen(char *str)
 {
@@ -233,16 +233,16 @@ size_t strcmp(char *s1, char *s2)
 	return *s1 - *s2;
 }
 
-int strncmp(char *str1, char *str2, size_t count)
+size_t strncmp(char *str1, char *str2, size_t n)
 {
-	while (count) {
+	while (n) {
 		if (*str1 != *str2)
 			return *str1 - *str2;
 		if (*str1 == '\0')
 			return 0;
 		str1++;
 		str2++;
-		count--;
+		n--;
 	}
 	return 0;
 }

@@ -30,3 +30,4 @@ pub const DISK_IMAGE_BASE: usize = 0x9000_0000;
 
 pub const SYSTEM_TASK_LIMIT: usize = 128;
 pub const SYSTEM_FD_LIMIT: usize = 256;
+pub const DEFAULT_FD_LIMIT: usize = 128;

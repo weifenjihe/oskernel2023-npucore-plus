@@ -11,7 +11,7 @@ U_FAT32_DIR := ../easy-fs-fuse
 CORE_NUM := 1
 ifeq ($(BOARD), k210)
 	U_FAT32 := /dev/sdc
-else 
+else
 	U_FAT32 := ${U_FAT32_DIR}/fat32.img
 endif
 

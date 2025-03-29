@@ -81,34 +81,7 @@ impl File for lwext4_rs::File {
     fn open_subfile(
         &self,
     ) -> Result<alloc::vec::Vec<(alloc::string::String, alloc::sync::Arc<dyn File>)>, isize> {
-        let path = &self.path.as_ptr();
-        if(path.is_null()){
-            return Err(-1);
-        }
-        let result = unsafe {
-            let mut file = lwext4_rs::File::new();
-            let mut files = alloc::vec::Vec::new();
-            let mut dirent = lwext4_rs::Dirent::new();
-            let mut i = 0;
-            loop {
-                let ret = lwext4_rs::ext4_readdir(&mut dirent, path, i);
-                if ret == 0 {
-                    break;
-                }
-                if dirent.name.is_null() {
-                    break;
-                }
-                let name = unsafe { core::ffi::CStr::from_ptr(dirent.name).to_str().unwrap() };
-                let mut file = lwext4_rs::File::new();
-                unsafe {
-                    lwext4_rs::ext4_fopen2(&mut file.file, dirent.name, 0);
-                }
-                files.push((alloc::string::String::from(name), file));
-                i += 1;
-            }
-            files
-        };
-        Ok(result)
+        todo!()
     }
 
     fn create(

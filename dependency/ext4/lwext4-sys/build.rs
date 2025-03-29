@@ -16,6 +16,9 @@ fn build_ext4(lwext4: &Path) {
     let dst = cmake::Config::new(lwext4)
         .define("LIB_ONLY", "1")
         .define("INSTALL_LIB", "1")
+        .define("CMAKE_C_FLAGS", "-mabi=lp64d -mcmodel=medany")
+        .define("CMAKE_CXX_FLAGS", "-mabi=lp64d -mcmodel=medany")
+        .define("CMAKE_ASM_FLAGS", "-mabi=lp64d -mcmodel=medany")
         .build();
 
     println!(

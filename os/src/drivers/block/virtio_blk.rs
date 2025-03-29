@@ -38,6 +38,51 @@ impl BlockDevice for VirtIOBlock {
     }
 }
 
+impl lwext4_rs::BlockDeviceInterface for VirtIOBlock {
+    fn read_block(&mut self, buf: &mut [u8],mut  block_id: u64, block_count: u32) -> lwext4_rs::Result<usize> {
+        block_id = block_id * (1024 as u64 / 512 as u64);
+        for buf in buf.chunks_mut(512) {
+            self.0
+                .lock()
+                .read_block(block_id as usize, buf);
+            block_id += 1;
+        }
+        Ok(0)
+    }
+
+    fn write_block(&mut self, buf: &[u8],mut block_id: u64, block_count: u32) -> lwext4_rs::Result<usize> {
+        block_id = block_id * (1024 as u64 / 512 as u64);
+        for buf in buf.chunks(512) {
+            self.0
+                .lock()
+                .write_block(block_id as usize, buf);
+            block_id += 1;
+        }
+        Ok(0)
+    }
+
+    fn close(&mut self) -> lwext4_rs::Result<()> {
+        Ok(())
+    }
+
+    fn open(&mut self) -> lwext4_rs::Result<lwext4_rs::BlockDeviceConfig> {
+        Ok(lwext4_rs::BlockDeviceConfig {
+            block_size: 512 as u32,
+            block_count: 999,
+            part_size: 512 as u64 * 2,
+            part_offset: 0
+        })
+    }
+
+    fn lock(&mut self) -> lwext4_rs::Result<()> {
+        Ok(())
+    }
+
+    fn unlock(&mut self) -> lwext4_rs::Result<()> {
+        Ok(())
+    }
+}
+
 impl VirtIOBlock {
     #[allow(unused)]
     pub fn new() -> Self {
