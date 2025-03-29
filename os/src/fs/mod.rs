@@ -1,7 +1,7 @@
 mod cache;
-mod dev;
+pub mod dev;
 pub mod directory_tree;
-mod fat32;
+mod ext4_file;
 pub mod file_trait;
 mod filesystem;
 mod layout;
@@ -14,11 +14,12 @@ use core::slice::{Iter, IterMut};
 
 pub use self::layout::*;
 
-pub use self::fat32::{BlockDevice, DiskInodeType};
+pub trait BlockDevice: crate::drivers::block::BlockDevice {}
+pub type DiskInodeType = lwext4_rs::FileType;
 
-use self::{cache::PageCache, directory_tree::DirectoryTreeNode, file_trait::File};
+pub use self::{cache::PageCache, directory_tree::DirectoryTreeNode, file_trait::File};
 use crate::{
-    config::SYSTEM_FD_LIMIT,
+    config::{DEFAULT_FD_LIMIT, SYSTEM_FD_LIMIT},
     mm::{Frame, UserBuffer},
     syscall::errno::*,
 };
@@ -28,6 +29,7 @@ use alloc::{
     vec::Vec,
 };
 use lazy_static::*;
+use log::warn;
 use spin::Mutex;
 
 lazy_static! {
@@ -35,15 +37,11 @@ lazy_static! {
         false,
         false,
         self::directory_tree::ROOT
-            .open(".", OpenFlags::O_RDONLY | OpenFlags::O_DIRECTORY, true)
+            .open("/", OpenFlags::O_RDWR | OpenFlags::O_DIRECTORY, true)
             .unwrap()
     ));
 }
-
-pub fn is_relative(path: &str) -> bool {
-    !path.starts_with('/') && path != "" && path != "."
-}
-
+#[allow(unused)]
 pub fn flush_preload() {
     extern "C" {
         fn sinitproc();
@@ -82,7 +80,6 @@ pub fn flush_preload() {
         crate::mm::frame_dealloc(ppn);
     }
 }
-
 #[derive(Clone)]
 pub struct FileDescriptor {
     cloexec: bool,
@@ -150,6 +147,23 @@ impl FileDescriptor {
     }
     pub fn get_stat(&self) -> Stat {
         self.file.get_stat()
+    }
+    pub fn get_statx(&self, mask: u32) -> Statx {
+        let stat = self.file.get_stat();
+        Statx::new(
+            mask,
+            stat.get_nlink(),
+            stat.get_mode() as u16,
+            stat.get_ino() as u64,
+            stat.get_size() as u64,
+            stat.get_atime() as i64,
+            stat.get_ctime() as i64,
+            stat.get_mtime() as i64,
+            (stat.get_rdev() & 0xffff_00) >> 8 as u32,
+            (stat.get_rdev() & 0xff) as u32,
+            (stat.get_dev() & 0xffff_00) >> 8 as u32,
+            (stat.get_dev() & 0xff) as u32,
+        )
     }
     pub fn open(&self, path: &str, flags: OpenFlags, special_use: bool) -> Result<Self, isize> {
         if path == "" {
@@ -290,25 +304,10 @@ pub struct FdTable {
     hard_limit: usize,
 }
 
-// impl<I: core::slice::SliceIndex<[Option<FileDescriptor>]>> Index<I> for FdTable {
-//     type Output = I::Output;
-
-//     #[inline(always)]
-//     fn index(&self, index: I) -> &Self::Output {
-//         &self.inner[index]
-//     }
-// }
-
-// impl<I: core::slice::SliceIndex<[Option<FileDescriptor>]>> IndexMut<I> for FdTable {
-//     #[inline(always)]
-//     fn index_mut(&mut self, index: I) -> &mut Self::Output {
-//         &mut self.inner[index]
-//     }
-// }
 
 #[allow(unused)]
 impl FdTable {
-    pub const DEFAULT_FD_LIMIT: usize = 128;
+    pub const DEFAULT_FD_LIMIT: usize = DEFAULT_FD_LIMIT;
     pub const SYSTEM_FD_LIMIT: usize = SYSTEM_FD_LIMIT;
     pub fn new(inner: Vec<Option<FileDescriptor>>) -> Self {
         Self {
@@ -376,6 +375,8 @@ impl FdTable {
         match self.inner[fd].take() {
             Some(file_descriptor) => {
                 self.recycled.push(fd as u8);
+                // FIXME: shit here, replace this with balanced binary tree
+                self.recycled.sort_by(|a, b| b.cmp(a));
                 Ok(file_descriptor)
             }
             None => Err(EBADF),
@@ -401,11 +402,13 @@ impl FdTable {
     pub fn insert(&mut self, file_descriptor: FileDescriptor) -> Result<usize, isize> {
         let fd = match self.recycled.pop() {
             Some(fd) => {
+                warn!("[fd_table_insert] recycle: {fd}");
                 self.inner[fd as usize] = Some(file_descriptor);
                 fd as usize
             }
             None => {
                 let current = self.inner.len();
+                warn!("[fd_table_insert] new: {current}");
                 if current == self.soft_limit {
                     return Err(EMFILE);
                 } else {
@@ -487,6 +490,14 @@ impl FdTable {
                 self.inner.push(Some(file_descriptor));
                 Ok(hint)
             }
+        }
+    }
+    /// Take the ownership of the given fd
+    pub fn take(&mut self, fd: usize) -> Option<FileDescriptor> {
+        if fd >= self.inner.len() {
+            None
+        } else {
+            self.inner[fd].take()
         }
     }
 }

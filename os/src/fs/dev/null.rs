@@ -59,6 +59,10 @@ impl File for Null {
         )
     }
 
+    fn get_statx(&self) -> crate::fs::Statx {
+        todo!()
+    }
+
     fn read_user(&self, offset: Option<usize>, buf: UserBuffer) -> usize {
         0
     }
@@ -68,11 +72,12 @@ impl File for Null {
     }
 
     fn get_file_type(&self) -> DiskInodeType {
-        DiskInodeType::File
+        // DiskInodeType::File
+        DiskInodeType::from_char('-')
     }
 
     fn info_dirtree_node(
-        &self,
+        &mut self,
         dirnode_ptr: alloc::sync::Weak<crate::fs::directory_tree::DirectoryTreeNode>,
     ) {
     }
@@ -119,7 +124,7 @@ impl File for Null {
     }
 
     fn truncate_size(&self, new_size: usize) -> Result<(), isize> {
-        todo!()
+        Ok(())
     }
 
     fn set_timestamp(&self, ctime: Option<usize>, atime: Option<usize>, mtime: Option<usize>) {

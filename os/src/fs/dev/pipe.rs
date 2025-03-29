@@ -179,7 +179,6 @@ impl File for Pipe {
             let task = current_task().unwrap();
             let inner = task.acquire_inner_lock();
             if !inner.sigpending.difference(inner.sigmask).is_empty() {
-                print!("differ");
                 return ERESTART as usize;
             }
             drop(inner);
@@ -190,28 +189,23 @@ impl File for Pipe {
                     return read_size;
                 }
                 drop(ring);
-                // suspend_current_and_run_next();
                 let task = current_task().unwrap();
                 wait_with_timeout(Arc::downgrade(&task), TimeSpec::now());
                 drop(task);
                 block_current_and_run_next();
+                // suspend_current_and_run_next();
                 continue;
             }
             // We guarantee that this operation will read at least one byte
-            // let mut buf_start = 0;
-            // while buf_start < buf.len() {
-            //     let read_bytes = ring.buffer_read(&mut buf[buf_start..]);
-            //     buf_start += read_bytes;
             while read_size < buf.len() {
                 let read_bytes = ring.buffer_read(&mut buf[read_size..]);
                 read_size += read_bytes;
                 if ring.head == ring.tail {
                     ring.status = RingBufferStatus::EMPTY;
-                    // read_size += buf_start;
                     return read_size;
                 }
             }
-            // read_size += buf_start;
+
             ring.status = RingBufferStatus::NORMAL;
             return read_size;
         }
@@ -222,6 +216,7 @@ impl File for Pipe {
             return ESPIPE as usize;
         }
         let mut write_size = 0usize;
+
         loop {
             let task = current_task().unwrap();
             let inner = task.acquire_inner_lock();
@@ -236,7 +231,6 @@ impl File for Pipe {
                     return write_size;
                 }
                 drop(ring);
-                // suspend_current_and_run_next();
                 let task = current_task().unwrap();
                 wait_with_timeout(Arc::downgrade(&task), TimeSpec::now());
                 drop(task);
@@ -277,6 +271,7 @@ impl File for Pipe {
         loop {
             let task = current_task().unwrap();
             let inner = task.acquire_inner_lock();
+            // 注释掉下面内容，pipe测例通过，跟读出pipe内容有关
             // if !inner.sigpending.difference(inner.sigmask).is_empty() {
             //     return ERESTART as usize;
             // }
@@ -292,6 +287,7 @@ impl File for Pipe {
                 wait_with_timeout(Arc::downgrade(&task), TimeSpec::now());
                 drop(task);
                 block_current_and_run_next();
+                // suspend_current_and_run_next();
                 continue;
             }
             // We guarantee that this operation will read at least one byte
@@ -337,6 +333,7 @@ impl File for Pipe {
                 wait_with_timeout(Arc::downgrade(&task), TimeSpec::now());
                 drop(task);
                 block_current_and_run_next();
+                // suspend_current_and_run_next();
                 continue;
             }
             // We guarantee that this operation will write at least one byte
@@ -377,11 +374,16 @@ impl File for Pipe {
         )
     }
 
-    fn get_file_type(&self) -> DiskInodeType {
-        DiskInodeType::File
+    fn get_statx(&self) -> crate::fs::Statx {
+        todo!()
     }
 
-    fn info_dirtree_node(&self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
+    fn get_file_type(&self) -> DiskInodeType {
+        // DiskInodeType::File
+        DiskInodeType::from_char('-')
+    }
+
+    fn info_dirtree_node(&mut self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
         todo!()
     }
 

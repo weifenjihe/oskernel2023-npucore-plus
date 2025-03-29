@@ -6,7 +6,7 @@ use crate::{
 };
 
 struct Socket;
-
+#[allow(unused)]
 pub fn make_socket() -> Arc<dyn File> {
     Arc::new(Socket {})
 }
@@ -57,11 +57,15 @@ impl File for Socket {
         todo!()
     }
 
+    fn get_statx(&self) -> crate::fs::Statx {
+        todo!()
+    }
+
     fn get_file_type(&self) -> DiskInodeType {
         todo!()
     }
 
-    fn info_dirtree_node(&self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
+    fn info_dirtree_node(&mut self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
         todo!()
     }
 

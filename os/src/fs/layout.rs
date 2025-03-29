@@ -127,7 +127,110 @@ pub struct Stat {
     st_ctime: TimeSpec,
     __unused: u64,
 }
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Statx {
+    pub stx_mask: u32,
+    pub stx_blksize: u32,
+    pub stx_attributes: u64,
+    pub stx_nlink: u32,
+    pub stx_uid: u32,
+    pub stx_gid: u32,
+    pub stx_mode: u16,
+    __statx_pad1: [u16; 1],
+    pub stx_ino: u64,
+    pub stx_size: u64,
+    pub stx_blocks: u64,
+    pub stx_attributes_mask: u64,
+    pub stx_atime: StatxTimestamp,
+    pub stx_btime: StatxTimestamp,
+    pub stx_ctime: StatxTimestamp,
+    pub stx_mtime: StatxTimestamp,
+    pub stx_rdev_major: u32,
+    pub stx_rdev_minor: u32,
+    pub stx_dev_major: u32,
+    pub stx_dev_minor: u32,
+    pub stx_mnt_id: u64,
+    __statx_pad2: u64,
+    __statx_pad3: [u64; 12],
+}
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct StatxTimestamp {
+    pub tv_sec: i64,
+    pub tv_nsec: u32,
+    pub __statx_timestamp_pad1: [i32; 1],
+}
 
+
+impl Statx {
+    #![allow(unused)]
+    /// Get the inode number described in the `Stat`
+    pub fn get_ino(&self) -> usize {
+        self.stx_ino as usize
+    }
+    pub fn get_size(&self) -> usize {
+        self.stx_size as usize
+    }
+    pub fn new(
+        stx_mask: u32,
+        stx_nlink: u32,
+        stx_mode: u16,
+        stx_ino: u64,
+        stx_size: u64,
+        stx_atime_sec: i64,
+        stx_ctime_sec: i64,
+        stx_mtime_sec: i64,
+        stx_rdev_major: u32,
+        stx_rdev_minor: u32,
+        stx_dev_major: u32,
+        stx_dev_minor: u32,
+    ) -> Self {
+        const BLK_SIZE: u32 = 512;
+        Self {
+            stx_mask: stx_mask,
+            stx_blksize: BLK_SIZE as u32,
+            stx_attributes: 0,
+            stx_nlink,
+            stx_uid: 0,
+            stx_gid: 0,
+            stx_mode,
+            __statx_pad1: [0 as u16; 1],
+            stx_ino,
+            stx_size,
+            stx_blocks: (stx_size as u64 + BLK_SIZE as u64 - 1) / BLK_SIZE as u64,
+            stx_attributes_mask: 0,
+            stx_atime: StatxTimestamp{
+                tv_sec: stx_atime_sec,
+                tv_nsec: 0,
+                __statx_timestamp_pad1: [0; 1],
+            },
+            stx_btime: StatxTimestamp{
+                tv_sec: stx_ctime_sec,
+                tv_nsec: 0,
+                __statx_timestamp_pad1: [0; 1],
+            },
+            stx_ctime: StatxTimestamp{
+                tv_sec: stx_ctime_sec,
+                tv_nsec: 0,
+                __statx_timestamp_pad1: [0; 1],
+            },
+            stx_mtime: StatxTimestamp{
+                tv_sec: stx_mtime_sec,
+                tv_nsec: 0,
+                __statx_timestamp_pad1: [0; 1],
+            },
+            stx_rdev_major,
+            stx_rdev_minor,
+            stx_dev_major,
+            stx_dev_minor,
+            stx_mnt_id: 0,
+            __statx_pad2: 0,
+            __statx_pad3: [0 as u64; 12],
+        }
+        
+    }
+}
 #[allow(unused)]
 impl Stat {
     /// Get the inode number described in the `Stat`

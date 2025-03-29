@@ -8,5 +8,6 @@
 		"./os/Cargo.toml",
 		"./user/Cargo.toml",
 		"./easy-fs/Cargo.toml",
-	]
+	],
+	"cmake.ignoreCMakeListsMissing": true
 }

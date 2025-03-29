@@ -51,12 +51,17 @@ impl File for Hwclock {
         todo!()
     }
 
+    fn get_statx(&self) -> crate::fs::Statx {
+        todo!()
+    }
+
     fn get_file_type(&self) -> DiskInodeType {
-        DiskInodeType::File
+        // DiskInodeType::File
+        DiskInodeType::from_char('-')
     }
 
     fn info_dirtree_node(
-        &self,
+        &mut self,
         dirnode_ptr: alloc::sync::Weak<crate::fs::directory_tree::DirectoryTreeNode>,
     ) {
     }

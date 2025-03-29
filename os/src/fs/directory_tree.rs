@@ -1,4 +1,8 @@
-use super::fat32::{DiskInodeType, EasyFileSystem};
+pub type EasyFileSystem = lwext4_rs::FileSystem<crate::drivers::block::BlockDeviceImpl>;
+type DiskInodeType = lwext4_rs::FileType;
+
+use core::{any::Any, borrow::Borrow};
+
 use alloc::{
     collections::BTreeMap,
     string::{String, ToString},
@@ -6,6 +10,7 @@ use alloc::{
     vec::Vec,
 };
 use lazy_static::*;
+use lwext4_rs::{BlockDevice, MountHandle, OpenOptions, RegisterHandle};
 use spin::{Mutex, MutexGuard, RwLock, RwLockWriteGuard};
 
 use super::{
@@ -17,10 +22,10 @@ use super::{
     Hwclock,
 };
 use crate::{
-    drivers::BLOCK_DEVICE,
+    drivers::block::BlockDeviceImpl,
     fs::{
-        fat32::inode::{InodeImpl, OSInode},
         filesystem::FS,
+        // inode::{InodeImpl, OSInode},
     },
 };
 
@@ -29,16 +34,30 @@ use crate::mm::tlb_invalidate;
 
 use crate::syscall::errno::*;
 
+
 lazy_static! {
-    pub static ref FILE_SYSTEM: Arc<EasyFileSystem> = EasyFileSystem::open(
-        BLOCK_DEVICE.clone(),
-        Arc::new(Mutex::new(BlockCacheManager::new()))
-    );
+    pub static ref FILE_SYSTEM: EasyFileSystem = EasyFileSystem::new(
+        MountHandle::mount(
+            RegisterHandle::register(BlockDevice::new(BlockDeviceImpl::new()), "shit".to_string())
+                .unwrap(),
+            "/".to_string(),
+            false,
+            false,
+        )
+        .unwrap()
+    )
+    .unwrap();
+}
+
+lazy_static! {
     pub static ref ROOT: Arc<DirectoryTreeNode> = {
+        FILE_SYSTEM.readdir("/").unwrap();
+
         let inode = DirectoryTreeNode::new(
-            "".to_string(),
-            Arc::new(FileSystem::new(FS::Fat32)),
-            OSInode::new(InodeImpl::root_inode(&FILE_SYSTEM)),
+            "shit".to_string(),
+            Arc::new(FileSystem::new(FS::EXT4)),
+            Arc::new(OpenOptions::new().open("/",false).unwrap()),
+            // OSInode::new(Arc::new()),
             Weak::new(),
         );
         inode.add_special_use();
@@ -100,7 +119,7 @@ impl DirectoryTreeNode {
         file: Arc<dyn File>,
         father: Weak<Self>,
     ) -> Arc<Self> {
-        let node = Arc::new(DirectoryTreeNode {
+        let mut dt = DirectoryTreeNode {
             spe_usage: Mutex::new(0),
             name,
             filesystem,
@@ -108,17 +127,15 @@ impl DirectoryTreeNode {
             selfptr: Mutex::new(Weak::new()),
             father: Mutex::new(father),
             children: RwLock::new(None),
-        });
+        };
+        let node = Arc::new(dt);
         *node.selfptr.lock() = Arc::downgrade(&node);
-        node.file.info_dirtree_node(Arc::downgrade(&node));
+        // dt.file.info_dirtree_node(&node);
         insert_directory_vec(Arc::downgrade(&node));
         node
     }
     pub fn add_special_use(&self) {
         *self.spe_usage.lock() += 1;
-    }
-    pub fn sub_special_use(&self) {
-        *self.spe_usage.lock() -= 1;
     }
     pub fn get_cwd(&self) -> String {
         let mut pathv = Vec::<String>::with_capacity(8);
@@ -253,15 +270,14 @@ impl DirectoryTreeNode {
         special_use: bool,
     ) -> Result<Arc<dyn File>, isize> {
         log::debug!("[open]: cwd: {}, path: {}", self.get_cwd(), path);
-
         const BUSYBOX_PATH: &str = "/busybox";
-        const REDIRECT_TO_BUSYBOX: [&str; 3] = ["/touch", "/rm", "/ls"];
+        const REDIRECT_TO_BUSYBOX: [&str; 4] = ["/touch", "/rm", "/ls", "/grep"];
         let path = if REDIRECT_TO_BUSYBOX.contains(&path) {
             BUSYBOX_PATH
         } else {
             path
         };
-        const LIBC_PATH: &str = "/libc.so";
+        const LIBC_PATH: &str = "/lib/libc.so";
         const REDIRECT_TO_LIBC: [&str; 3] = [
             "/lib/ld-musl-riscv64.so.1",
             "/lib/ld-musl-riscv64-sf.so.1",
@@ -269,11 +285,6 @@ impl DirectoryTreeNode {
         ];
         let path = if REDIRECT_TO_LIBC.contains(&path) {
             LIBC_PATH
-        } else {
-            path
-        };
-        let path = if path == "/bin/bash" {
-            "/bash"
         } else {
             path
         };
@@ -314,7 +325,8 @@ impl DirectoryTreeNode {
                         if !flags.contains(OpenFlags::O_CREAT) {
                             return Err(ENOENT);
                         }
-                        let new_file = match inode.create(last_comp, DiskInodeType::File) {
+                        let new_file = match inode.create(last_comp, DiskInodeType::from_char('-'))
+                        {
                             Ok(file) => file,
                             Err(errno) => return Err(errno),
                         };
@@ -394,7 +406,7 @@ impl DirectoryTreeNode {
                     return Err(EEXIST);
                 }
                 Err(ENOENT) => {
-                    let new_file = match inode.create(last_comp, DiskInodeType::Directory) {
+                    let new_file = match inode.create(last_comp, DiskInodeType::from_char('d')) {
                         Ok(file) => file,
                         Err(errno) => return Err(errno),
                     };
@@ -555,11 +567,16 @@ impl DirectoryTreeNode {
         };
         match old_inode.filesystem.fs_type {
             FS::Fat32 => {
-                let old_file = old_inode.file.downcast_ref::<OSInode>().unwrap();
-                let new_par_file = new_par_inode.file.downcast_ref::<OSInode>().unwrap();
-                new_par_file.link_child(old_last_comp, old_file)?;
+                // let old_file = old_inode.file.downcast_ref::<OSInode>().unwrap();
+                // let new_par_file = new_par_inode.file.downcast_ref::<OSInode>().unwrap();
+                // new_par_file.link_child(old_last_comp, old_file)?;
+                unimplemented!()
             }
             FS::Null => return Err(EACCES),
+            FS::EXT4 => {
+                FILE_SYSTEM.rename(old_path, new_path).unwrap();
+                // unimplemented!()
+            }
         }
         *value.father.lock() = Arc::downgrade(&new_par_inode.get_arc());
         new_lock.lock().as_mut().unwrap().insert(new_key, value);
@@ -596,59 +613,60 @@ pub fn init_fs() {
     init_device_directory();
     init_tmp_directory();
     init_proc_directory();
+
 }
 #[allow(unused)]
 fn init_device_directory() {
     ROOT.mkdir("/dev");
 
-    let dev_inode = match ROOT.cd_path("/dev") {
-        Ok(inode) => inode,
-        Err(_) => panic!("dev directory doesn't exist"),
-    };
+    // let dev_inode = match ROOT.cd_path("/dev") {
+    //     Ok(inode) => inode,
+    //     Err(_) => panic!("dev directory doesn't exist"),
+    // };
 
-    dev_inode.mkdir("shm");
-    dev_inode.mkdir("misc");
+    // dev_inode.mkdir("shm");
+    // dev_inode.mkdir("misc");
 
-    let null_dev = DirectoryTreeNode::new(
-        "null".to_string(),
-        Arc::new(FileSystem::new(FS::Null)),
-        Arc::new(Null {}),
-        Arc::downgrade(&dev_inode.get_arc()),
-    );
-    let zero_dev = DirectoryTreeNode::new(
-        "zero".to_string(),
-        Arc::new(FileSystem::new(FS::Null)),
-        Arc::new(Zero {}),
-        Arc::downgrade(&dev_inode.get_arc()),
-    );
-    let tty_dev = DirectoryTreeNode::new(
-        "tty".to_string(),
-        Arc::new(FileSystem::new(FS::Null)),
-        Arc::new(Teletype::new()),
-        Arc::downgrade(&dev_inode.get_arc()),
-    );
-    let mut lock = dev_inode.children.write();
-    lock.as_mut().unwrap().insert("null".to_string(), null_dev);
-    lock.as_mut().unwrap().insert("zero".to_string(), zero_dev);
-    lock.as_mut().unwrap().insert("tty".to_string(), tty_dev);
-    drop(lock);
+    // let null_dev = DirectoryTreeNode::new(
+    //     "null".to_string(),
+    //     Arc::new(FileSystem::new(FS::Null)),
+    //     Arc::new(Null {}),
+    //     Arc::downgrade(&dev_inode.get_arc()),
+    // );
+    // let zero_dev = DirectoryTreeNode::new(
+    //     "zero".to_string(),
+    //     Arc::new(FileSystem::new(FS::Null)),
+    //     Arc::new(Zero {}),
+    //     Arc::downgrade(&dev_inode.get_arc()),
+    // );
+    // let tty_dev = DirectoryTreeNode::new(
+    //     "tty".to_string(),
+    //     Arc::new(FileSystem::new(FS::Null)),
+    //     Arc::new(Teletype::new()),
+    //     Arc::downgrade(&dev_inode.get_arc()),
+    // );
+    // let mut lock = dev_inode.children.write();
+    // lock.as_mut().unwrap().insert("null".to_string(), null_dev);
+    // lock.as_mut().unwrap().insert("zero".to_string(), zero_dev);
+    // lock.as_mut().unwrap().insert("tty".to_string(), tty_dev);
+    // drop(lock);
 
-    let misc_inode = match dev_inode.cd_path("./misc") {
-        Ok(inode) => inode,
-        Err(_) => panic!("misc directory doesn't exist"),
-    };
-    let hwclock_dev = DirectoryTreeNode::new(
-        "rtc".to_string(),
-        Arc::new(FileSystem::new(FS::Null)),
-        Arc::new(Hwclock {}),
-        Arc::downgrade(&misc_inode.get_arc()),
-    );
-    let mut lock = misc_inode.children.write();
-    misc_inode.cache_all_subfile(&mut lock);
-    lock.as_mut()
-        .unwrap()
-        .insert("rtc".to_string(), hwclock_dev);
-    drop(lock);
+    // let misc_inode = match dev_inode.cd_path("./misc") {
+    //     Ok(inode) => inode,
+    //     Err(_) => panic!("misc directory doesn't exist"),
+    // };
+    // let hwclock_dev = DirectoryTreeNode::new(
+    //     "rtc".to_string(),
+    //     Arc::new(FileSystem::new(FS::Null)),
+    //     Arc::new(Hwclock {}),
+    //     Arc::downgrade(&misc_inode.get_arc()),
+    // );
+    // let mut lock = misc_inode.children.write();
+    // misc_inode.cache_all_subfile(&mut lock);
+    // lock.as_mut()
+    //     .unwrap()
+    //     .insert("rtc".to_string(), hwclock_dev);
+    // drop(lock);
 }
 fn init_tmp_directory() {
     match ROOT.mkdir("/tmp") {
