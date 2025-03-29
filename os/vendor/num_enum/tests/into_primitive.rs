@@ -1,5 +1,3 @@
-#![cfg_attr(feature = "nightly", feature(arbitrary_enum_discriminant))]
-
 use ::num_enum::IntoPrimitive;
 
 // Guard against https://github.com/illicitonion/num_enum/issues/27
@@ -29,7 +27,6 @@ fn simple() {
 }
 
 #[test]
-#[cfg(feature = "nightly")]
 fn catch_all() {
     #[derive(Debug, Eq, PartialEq, IntoPrimitive)]
     #[repr(u8)]

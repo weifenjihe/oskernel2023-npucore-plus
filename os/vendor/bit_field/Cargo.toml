@@ -3,30 +3,34 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g., crates.io) dependencies
+# to registry (e.g., crates.io) dependencies.
 #
-# If you believe there's an error in this file please file an
-# issue against the rust-lang/cargo repository. If you're
-# editing this file be aware that the upstream Cargo.toml
-# will likely look very different (and much more reasonable)
+# If you are reading this file be aware that the original Cargo.toml
+# will likely look very different (and much more reasonable).
+# See Cargo.toml.orig for the original contents.
 
 [package]
 name = "bit_field"
-version = "0.10.1"
+version = "0.10.2"
 authors = ["Philipp Oppermann <dev@phil-opp.com>"]
 description = "Simple bit field trait providing get_bit, get_bits, set_bit, and set_bits methods for Rust's integral types."
 documentation = "https://docs.rs/bit_field"
+readme = "README.md"
 keywords = ["no_std"]
 license = "Apache-2.0/MIT"
 repository = "https://github.com/phil-opp/rust-bit-field"
+
 [package.metadata.release]
-no-dev-version = true
+dev-version = false
 pre-release-commit-message = "Release version {{version}}"
 
 [[package.metadata.release.pre-release-replacements]]
-exactly = 1
 file = "Changelog.md"
-replace = "## Unreleased\n\n# {{version}} – {{date}}"
 search = "## Unreleased"
+replace = """
+## Unreleased
+
+# {{version}} – {{date}}"""
+exactly = 1
 
 [dependencies]

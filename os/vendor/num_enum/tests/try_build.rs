@@ -2,30 +2,48 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-#[rustversion::all(nightly)]
-const NIGHTLY: bool = true;
-
-#[rustversion::not(nightly)]
-const NIGHTLY: bool = false;
-
 #[test]
 fn trybuild() {
     let directory = PathBuf::from("tests/try_build");
 
     let mut _renamer = None;
 
+    let compile_fail_dir = directory.join("compile_fail");
+
     // Sometimes error messages change on beta/nightly - allow alternate errors on those.
-    _renamer = Some(Renamer::rename(directory.join("compile_fail")).unwrap());
+    _renamer = Some(Renamer::rename(compile_fail_dir.clone()).unwrap());
 
     let fail = trybuild::TestCases::new();
-    fail.compile_fail(directory.join("compile_fail/*.rs"));
-
-    if NIGHTLY {
-        fail.compile_fail(directory.join("nightly/compile_fail/*.rs"));
-    }
+    fail.compile_fail(compile_fail_dir.join("*.rs"));
+    add_feature_dirs(&compile_fail_dir, &fail, ExpectedResult::Fail);
 
     let pass = trybuild::TestCases::new();
-    pass.pass(directory.join("pass/*.rs"));
+    let pass_dir = directory.join("pass");
+    pass.pass(pass_dir.join("*.rs"));
+    add_feature_dirs(&pass_dir, &pass, ExpectedResult::Pass);
+}
+
+enum ExpectedResult {
+    Pass,
+    Fail,
+}
+
+fn add_feature_dirs(
+    parent_dir: &Path,
+    test_cases: &trybuild::TestCases,
+    expected_result: ExpectedResult,
+) {
+    let features_dir = parent_dir.join("features");
+    let feature_specific_dir = if cfg!(feature = "complex-expressions") {
+        features_dir.join("complex-expressions")
+    } else {
+        features_dir.join("!complex-expressions")
+    };
+    let tests = feature_specific_dir.join("*.rs");
+    match expected_result {
+        ExpectedResult::Pass => test_cases.pass(tests),
+        ExpectedResult::Fail => test_cases.compile_fail(tests),
+    }
 }
 
 struct Renamer(Vec<PathBuf>);
