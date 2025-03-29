@@ -8,11 +8,18 @@ KERNEL_BIN := $(KERNEL_ELF).bin
 DISASM_TMP := target/$(TARGET)/$(MODE)/asm
 FS_IMG := ../user/target/$(TARGET)/$(MODE)/fs.img
 U_FAT32_DIR := ../easy-fs-fuse
+U_EXT4_DIR := ../easy-fs-ext4
 CORE_NUM := 1
 ifeq ($(BOARD), k210)
 	U_FAT32 := /dev/sdc
 else
 	U_FAT32 := ${U_FAT32_DIR}/fat32.img
+endif
+
+ifeq ($(BOARD), k210)
+	U_EXT4 := /dev/sdc
+else
+	U_EXT4 := ${U_EXT4_DIR}/ext4.img
 endif
 
 ifeq ($(MODE), release)
@@ -103,6 +110,9 @@ $(APPS):
 fat32:
 	./buildfs.sh "$(U_FAT32_DIR)/fat32.img"
 
+ext4:
+	./buildfs.sh "$(U_EXT4_DIR)/ext4.img"
+
 fsimg-format:
 	sudo mkfs.vfat -F 32 ${U_FAT32}
 
@@ -174,6 +184,34 @@ run-k210:
 		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
     endif
 
+run-ext4: build do-run-ext4
+
+do-run-ext4:
+ifeq ($(BOARD), qemu)
+	@qemu-system-riscv64 \
+		-machine virt \
+		-nographic \
+		-bios $(BOOTLOADER) \
+		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
+		-drive file=$(U_EXT4),if=none,format=raw,id=x0 \
+        -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
+		-smp threads=$(CORE_NUM)
+else
+	if [ ! -e "$(K210-BURNER)" ]; then (cd .. && git clone https://gitee.com/begehau/kflash.py.git && mv kflash.py tools) fi
+	@cp $(BOOTLOADER) $(BOOTLOADER).copy
+	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
+	@mv $(BOOTLOADER).copy $(KERNEL_BIN)
+    ifeq ($(findstring WSL, $(shell uname -a)), )
+		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
+		python3 $(K210-BURNER) -p $(K210-SERIALPORT-LINUX) -b 1500000 $(KERNEL_BIN)
+		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
+    else
+		powershell.exe 'usbipd wsl detach --all; python $(K210-BURNER) -p $(K210-SERIALPORT-WINDOWS) -b 1500000 $(KERNEL_BIN); (usbipd wsl list | findstr "$(K210-SERIALPORT-WINDOWS)") -match "\d-\d"; usbipd wsl attach --busid $$matches[0]'
+		@sleep 1
+		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
+		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
+    endif
+endif
 
 
 monitor:
@@ -183,6 +221,12 @@ gdb:
 	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,\
 	file=target/riscv64gc-unknown-none-elf/debug/os,addr=0x80200000 -drive \
 	file=$(U_FAT32),if=none,format=raw,id=x0 \
+	-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -smp threads=$(CORE_NUM) -S -s # file=target/riscv64gc-unknown-none-elf/$(MODE)/os,addr=0x80200000 -drive
+
+gdb-ext4:
+	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,\
+	file=target/riscv64gc-unknown-none-elf/debug/os,addr=0x80200000 -drive \
+	file=$(U_EXT4),if=none,format=raw,id=x0 \
 	-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -smp threads=$(CORE_NUM) -S -s # file=target/riscv64gc-unknown-none-elf/$(MODE)/os,addr=0x80200000 -drive
 
 runsimple:
@@ -209,4 +253,4 @@ easy-fs-doc:
 os-doc:
 	cargo doc --no-deps --release --target riscv64gc-unknown-none-elf --document-private-items
 	@./clear_doc.sh os
-.PHONY: user
+.PHONY: user fat32 ext4 run run-ext4
