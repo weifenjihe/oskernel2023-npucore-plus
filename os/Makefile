@@ -111,7 +111,7 @@ fat32:
 	./buildfs.sh "$(U_FAT32_DIR)/fat32.img"
 
 ext4:
-	./buildfs.sh "$(U_EXT4_DIR)/ext4.img"
+	./buildfs_ext4.sh "$(U_EXT4_DIR)/ext4.img"
 
 fsimg-format:
 	sudo mkfs.vfat -F 32 ${U_FAT32}

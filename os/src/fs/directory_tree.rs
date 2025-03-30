@@ -10,7 +10,7 @@ use alloc::{
     vec::Vec,
 };
 use lazy_static::*;
-use lwext4_rs::{BlockDevice, MountHandle, OpenOptions, RegisterHandle};
+use lwext4_rs::{os_log, BlockDevice, MountHandle, OpenOptions, RegisterHandle};
 use spin::{Mutex, MutexGuard, RwLock, RwLockWriteGuard};
 
 use super::{
@@ -36,17 +36,27 @@ use crate::syscall::errno::*;
 
 
 lazy_static! {
-    pub static ref FILE_SYSTEM: EasyFileSystem = EasyFileSystem::new(
-        MountHandle::mount(
-            RegisterHandle::register(BlockDevice::new(BlockDeviceImpl::new()), "shit".to_string())
-                .unwrap(),
+    pub static ref FILE_SYSTEM: EasyFileSystem = {
+        let block_device = RegisterHandle::register(
+            BlockDevice::new(BlockDeviceImpl::new()),
+            "shit".to_string(),
+        ).unwrap_or_else(|err| {
+            panic!("Failed to register block device: {:?}", err);
+        });
+        let mount_handle = MountHandle::mount(
+            block_device,
             "/".to_string(),
             false,
             false,
-        )
-        .unwrap()
-    )
-    .unwrap();
+        ).unwrap_or_else(|err| {
+            panic!("Mount failed: {:?}", err);
+        });
+
+        EasyFileSystem::new(mount_handle)
+            .unwrap_or_else(|err| {
+                panic!("Failed to create file system: {:?}", err);
+            })
+    };
 }
 
 lazy_static! {
