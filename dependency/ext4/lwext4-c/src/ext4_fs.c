@@ -65,7 +65,7 @@ int ext4_fs_init(struct ext4_fs *fs, struct ext4_blockdev *bdev, bool read_only)
 	int r, i;
 	uint16_t tmp;
 	uint32_t bsize;
-
+	os_log("ext4_fs_init");
 	ext4_assert(fs && bdev);
 
 	fs->bdev = bdev;

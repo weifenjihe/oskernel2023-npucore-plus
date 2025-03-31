@@ -38,7 +38,7 @@ board_qemu = ["rv64"]
 board_k210 = ["k210-pac", "k210-hal", "k210-soc", "oom_handler"]
 board_fu740 = ["fu740-pac", "fu740-hal", "zero_init"]
 log_off = ["log/max_level_off"]
-comp = ["board_qemu", "log_off"]
+comp = ["board_qemu"]
 
 default = ["comp"]
 

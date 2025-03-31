@@ -156,6 +156,7 @@ impl<T: BlockDeviceInterface> MountHandle<T> {
     ) -> Result<Self> {
         let c_mount_point = CName::new(mount_point)?;
         let dev_name = register_handle.dev_name();
+        log::info!("Mounting {} to {}", dev_name.as_str(), c_mount_point.as_str());
         unsafe {
             errno_to_result(ext4_mount(
                 dev_name.as_ptr(),

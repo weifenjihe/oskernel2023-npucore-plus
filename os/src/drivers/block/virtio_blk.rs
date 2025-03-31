@@ -67,9 +67,9 @@ impl lwext4_rs::BlockDeviceInterface for VirtIOBlock {
 
     fn open(&mut self) -> lwext4_rs::Result<lwext4_rs::BlockDeviceConfig> {
         Ok(lwext4_rs::BlockDeviceConfig {
-            block_size: 512 as u32,
+            block_size: 1024 as u32,
             block_count: 999,
-            part_size: 512 as u64 * 2,
+            part_size: 1024 as u64 * 2,
             part_offset: 0
         })
     }
