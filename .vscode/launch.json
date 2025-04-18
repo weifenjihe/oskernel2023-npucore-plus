@@ -5,9 +5,9 @@
              "type": "cppdbg",
              "request": "launch",
              "name": "Attach to gdbserver",
-             "program": "${workspaceFolder}/os/target/riscv64gc-unknown-none-elf/debug/os",
+             "program": "${workspaceFolder}/os/target/loongarch64-unknown-linux-gnu/debug/os",
              "miDebuggerServerAddress": "localhost:1234",
-             "miDebuggerPath": "riscv64-unknown-elf-gdb",
+             "miDebuggerPath": "/home/stl/la64tool/loongarch64-linux-gnu-gdb/bin/loongarch64-linux-gnu-gdb",
             //  
              "cwd": "${workspaceRoot}/os",
        }
