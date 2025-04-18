@@ -10,8 +10,16 @@ struct KernelOutput;
 
 impl Write for KernelOutput {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        let mut i = 0;
         for c in s.chars() {
             console_putchar(c as usize);
+            i += 1;
+            if i >= 4 {
+                console_flush();
+                i = 0;
+            }
+        }
+        if i != 0 {
             console_flush();
         }
         Ok(())
@@ -32,7 +40,7 @@ macro_rules! print {
 #[macro_export]
 macro_rules! println {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+        $crate::console::print(format_args!(concat!($fmt, crate::newline!()) $(, $($arg)+)?))
     }
 }
 

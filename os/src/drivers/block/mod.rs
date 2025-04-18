@@ -1,11 +1,16 @@
 mod block_dev;
 mod mem_blk;
+mod sata_blk;
 mod virtio_blk;
 pub use block_dev::BlockDevice;
-pub use mem_blk::MemBlockWrapper;
-pub use virtio_blk::VirtIOBlock;
+#[cfg(feature = "block_mem")]
+type BlockDeviceImpl = mem_blk::MemBlockWrapper;
+#[cfg(feature = "block_sata")]
+type BlockDeviceImpl = sata_blk::SataBlock;
+#[cfg(feature = "block_virtio")]
+type BlockDeviceImpl = virtio_blk::VirtIOBlock;
 
-pub use crate::arch::BlockDeviceImpl;
+use crate::arch::BLOCK_SZ;
 use alloc::sync::Arc;
 use lazy_static::*;
 
@@ -16,9 +21,9 @@ lazy_static! {
 #[allow(unused)]
 pub fn block_device_test() {
     let block_device = BLOCK_DEVICE.clone();
-    let mut write_buffer = [0u8; 512];
-    let mut read_buffer = [0u8; 512];
-    for i in 0..512 {
+    let mut write_buffer = [0u8; BLOCK_SZ];
+    let mut read_buffer = [0u8; BLOCK_SZ];
+    for i in 0..BLOCK_SZ {
         for byte in write_buffer.iter_mut() {
             *byte = i as u8;
         }

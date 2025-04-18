@@ -1,3 +1,4 @@
+use crate::arch::{MachineContext, TrapContext};
 use crate::config::{PAGE_SIZE, SYSTEM_TASK_LIMIT, USER_STACK_SIZE};
 use crate::fs::OpenFlags;
 use crate::mm::{
@@ -15,7 +16,6 @@ use crate::task::{
     wake_interruptible, Rusage, TaskStatus,
 };
 use crate::timer::{get_time_ms, get_time_sec, ITimerVal, TimeSpec, TimeVal, TimeZone, Times};
-use crate::trap::{MachineContext, TrapContext};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -24,12 +24,11 @@ use core::mem::size_of;
 use log::{debug, error, info, trace, warn};
 use num_enum::FromPrimitive;
 use crate::arch::shutdown;
-pub fn sys_exit(exit_code: u32) -> ! {
-    exit_current_and_run_next((exit_code & 0xff) << 8);
-}
-
 pub fn sys_shutdown() -> isize {
     shutdown()
+}
+pub fn sys_exit(exit_code: u32) -> ! {
+    exit_current_and_run_next((exit_code & 0xff) << 8);
 }
 
 pub fn sys_exit_group(exit_code: u32) -> ! {
@@ -257,11 +256,17 @@ pub fn sys_uname(buf: *mut u8) -> isize {
     );
     // A little stupid but still efficient.
     const FIELD_OFFSET: usize = 65;
-    buffer.write_at(FIELD_OFFSET * 0, b"Linux\0");
-    buffer.write_at(FIELD_OFFSET * 1, b"debian\0");
-    buffer.write_at(FIELD_OFFSET * 2, b"5.10.0-7-riscv64\0");
-    buffer.write_at(FIELD_OFFSET * 3, b"#1 SMP Debian 5.10.40-1 (2021-05-28)\0");
-    buffer.write_at(FIELD_OFFSET * 4, b"riscv64\0");
+    // buffer.write_at(FIELD_OFFSET * 0, b"Linux\0");
+    // buffer.write_at(FIELD_OFFSET * 1, b"debian\0");
+    // buffer.write_at(FIELD_OFFSET * 2, b"5.10.0-7-riscv64\0");
+    // buffer.write_at(FIELD_OFFSET * 3, b"#1 SMP Debian 5.10.40-1 (2021-05-28)\0");
+    // buffer.write_at(FIELD_OFFSET * 4, b"riscv64\0");
+    // buffer.write_at(FIELD_OFFSET * 5, b"\0");
+    buffer.write_at(FIELD_OFFSET * 0, b"NPUcore\0");
+    buffer.write_at(FIELD_OFFSET * 1, b"xeinnious\0");
+    buffer.write_at(FIELD_OFFSET * 2, b"0.10.0-1-loongarch64\0");
+    buffer.write_at(FIELD_OFFSET * 3, b"#1 SMP Xein-Revo 0.10.0-1 (2025-01-10)\0");
+    buffer.write_at(FIELD_OFFSET * 4, b"loongarch64\0");
     buffer.write_at(FIELD_OFFSET * 5, b"\0");
     SUCCESS
 }
@@ -275,7 +280,6 @@ pub fn sys_getppid() -> isize {
     let task = current_task().unwrap();
     let inner = task.acquire_inner_lock();
     let ppid = inner.parent.as_ref().unwrap().upgrade().unwrap().tgid;
-    // print!("{}", ppid);
     ppid as isize
 }
 
@@ -314,6 +318,20 @@ pub fn sys_getpgid(pid: usize) -> isize {
         Some(task) => task.getpgid() as isize,
         None => ESRCH,
     }
+}
+/// creates a new session if the calling process is not a process group leader.
+/// The calling process is the leader of the new session
+/// 当前进程脱离父进程，从父进程的子进程列表中移除当前进程，当前进程的父进程设置为空。
+pub fn sys_setsid() -> isize {
+    let task = current_task().unwrap();
+    if let Some(parent) = task.acquire_inner_lock().parent.as_ref().unwrap().upgrade() {
+        parent
+            .acquire_inner_lock()
+            .children
+            .retain(|x| x.tid != task.tid);
+    }
+    task.acquire_inner_lock().parent = None;
+    SUCCESS
 }
 
 // For user, tid is pid in kernel
@@ -380,8 +398,7 @@ pub fn sys_sysinfo(info: *mut Sysinfo) -> isize {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn sys_sbrk(increment: isize) -> isize {
+pub fn sys_sbrk(increment: isize) -> isize {
     let task = current_task().unwrap();
     let mut inner = task.acquire_inner_lock();
     let mut memory_set = task.vm.lock();
@@ -389,8 +406,7 @@ pub extern "C" fn sys_sbrk(increment: isize) -> isize {
     inner.heap_pt as isize
 }
 
-#[no_mangle]
-pub extern "C" fn sys_brk(brk_addr: usize) -> isize {
+pub fn sys_brk(brk_addr: usize) -> isize {
     let task = current_task().unwrap();
     let mut inner = task.acquire_inner_lock();
     let mut memory_set = task.vm.lock();
@@ -484,33 +500,45 @@ pub fn sys_clone(
             Err(errno) => return errno,
         };
     }
-    if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-        match translated_refmut(child.get_user_token(), ctid) {
-            Ok(word) => *word = child.pid.0 as u32,
-            Err(errno) => return errno,
-        };
-    }
-    if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
-        child.acquire_inner_lock().clear_child_tid = ctid as usize;
-    }
+    // todo: CLONE_CHILD_SETTID标志被设置，但是ctid指针为零，会出现地址错误，干脆全注释掉
+    // if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+    //     match translated_refmut(child.get_user_token(), ctid) {
+    //         Ok(word) => *word = child.pid.0 as u32,
+    //         Err(errno) => return errno,
+    //     };
+    // }
+    // if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
+    //     child.acquire_inner_lock().clear_child_tid = ctid as usize;
+    // }
     // add new task to scheduler
     add_task(child);
     new_pid as isize
 }
 
+/// 执行可执行文件
+/// # 参数
+/// + pathname：文件路径
+/// + argv：参数列表
+/// + envp：环境变量列表
 pub fn sys_execve(
     pathname: *const u8,
     mut argv: *const *const u8,
     mut envp: *const *const u8,
 ) -> isize {
+    // 设置默认shell为bash
     const DEFAULT_SHELL: &str = "/bin/bash";
+    // 获取当前进程
     let task = current_task().unwrap();
+    // 获取当前进程的用户态内存访问权限
     let token = task.get_user_token();
+    // 获取可执行文件的路径
     let path = match translated_str(token, pathname) {
         Ok(path) => path,
         Err(errno) => return errno,
     };
+    // 解析参数列表
     let mut argv_vec: Vec<String> = Vec::with_capacity(16);
+    // 解析环境变量列表
     let mut envp_vec: Vec<String> = Vec::with_capacity(16);
     if !argv.is_null() {
         loop {
@@ -555,18 +583,26 @@ pub fn sys_execve(
         envp_vec,
         envp_vec.len()
     );
+    // 获取当前工作目录的文件描述符
     let working_inode = &task.fs.lock().working_inode;
 
     match working_inode.open(&path, OpenFlags::O_RDONLY, false) {
+        // 检查打开的文件
         Ok(file) => {
+            // 若文件大小小于4，则返回ENOEXEC
+            // 即非可执行文件
             if file.get_size() < 4 {
                 return ENOEXEC;
             }
+            // 看前四个字节是否是可执行文件魔数
             let mut magic_number = Box::<[u8; 4]>::new([0; 4]);
             // this operation may be expensive... I'm not sure
             file.read(Some(&mut 0usize), magic_number.as_mut_slice());
             let elf = match magic_number.as_slice() {
+                // ELF可执行文件
                 b"\x7fELF" => file,
+                // 脚本文件
+                // 用默认Shell即bash加载
                 b"#!" => {
                     let shell_file = working_inode
                         .open(DEFAULT_SHELL, OpenFlags::O_RDONLY, false)
@@ -574,6 +610,7 @@ pub fn sys_execve(
                     argv_vec.insert(0, DEFAULT_SHELL.to_string());
                     shell_file
                 }
+                // 非可执行文件
                 _ => return ENOEXEC,
             };
 
@@ -1034,7 +1071,7 @@ pub fn sys_sigreturn() -> isize {
             + 2 * size_of::<usize>()
             + size_of::<SignalStack>()
             + size_of::<Signals>()
-            + crate::trap::UserContext::PADDING_SIZE) as *mut MachineContext,
+            + crate::arch::UserContext::PADDING_SIZE) as *mut MachineContext,
         (trap_cx as *mut TrapContext).cast::<MachineContext>(),
     )
     .unwrap(); // restore trap_cx

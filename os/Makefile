@@ -1,256 +1,128 @@
-# Building
-TARGET := riscv64gc-unknown-none-elf
-MODE := release
-RUSTSBI_K210_ELF := ../rustsbi-k210/target/riscv64gc-unknown-none-elf/release/rustsbi-k210
-RUSTSBI_K210_BIN := $(RUSTSBI_K210_ELF).bin
-KERNEL_ELF := target/$(TARGET)/$(MODE)/os
-KERNEL_BIN := $(KERNEL_ELF).bin
-DISASM_TMP := target/$(TARGET)/$(MODE)/asm
-FS_IMG := ../user/target/$(TARGET)/$(MODE)/fs.img
-U_FAT32_DIR := ../easy-fs-fuse
-U_EXT4_DIR := ../easy-fs-ext4
-CORE_NUM := 1
-ifeq ($(BOARD), k210)
-	U_FAT32 := /dev/sdc
-else
-	U_FAT32 := ${U_FAT32_DIR}/fat32.img
+# run: 清除编译结果，重新编译，运行
+# all: 直接编译，并把.bin内核拷贝到根目录（适配大赛要求）
+# gdb: 只运行gdb（需要先通过make run来编译）
+# clean: 清除编译结果
+
+TARGET := loongarch64-unknown-linux-gnu
+MODE := debug
+FS_MODE ?= ext4
+
+KERNEL_ELF = target/$(TARGET)/$(MODE)/os
+KERNEL_BIN = $(KERNEL_ELF).bin
+KERNEL_UIMG = $(KERNEL_ELF).ui
+
+BOARD ?= laqemu
+LDBOARD = la2k1000
+
+# 大写K转小写
+ifeq ($(BOARD), 2K1000)
+	BOARD = 2k1000
 endif
 
-ifeq ($(BOARD), k210)
-	U_EXT4 := /dev/sdc
-else
-	U_EXT4 := ${U_EXT4_DIR}/ext4.img
-endif
+BLOCK ?= virtio
 
-ifeq ($(MODE), release)
-	RELEASE := --release
-endif
-
-SDDEV := $(shell lsblk -do NAME | grep sd | tail -1)
-SDCARD := /dev/$(SDDEV)
-APPS := ../user/src/bin/*
-TOP := ../../k210.bin
-
-# BOARD
-BOARD ?= qemu
-SBI ?= opensbi-1.0
-ifeq ($(BOARD), qemu)
-	ifeq ($(SBI), rustsbi)
-		BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
-	else ifeq ($(SBI), default)
-		BOOTLOADER := default
-	else
-		BOOTLOADER := ../bootloader/fw_payload.bin
-	endif
-else ifeq ($(BOARD), k210)
-	BOOTLOADER := ../bootloader/rustsbi-$(BOARD).bin
-endif
-K210_BOOTLOADER_SIZE := 131072
+# Binutils
+OBJCOPY := loongarch64-linux-gnu-objcopy
+OBJDUMP := loongarch64-linux-gnu-objdump
+READELF := loongarch64-linux-gnu-readelf
 
 ifndef LOG
 	LOG_OPTION := "log_off"
 endif
 
-# KERNEL ENTRY
-ifeq ($(BOARD), qemu)
-	KERNEL_ENTRY_PA := 0x80200000
-else ifeq ($(BOARD), k210)
-	KERNEL_ENTRY_PA := 0x80020000
+ifeq ($(MODE), debug)
+	LA_2k1000_DISABLE_EH_FRAME := -D EH_ENABLED
 endif
 
-# Run K210
-K210-SERIALPORT-LINUX = /dev/ttyUSB0
-K210-SERIALPORT-WINDOWS = COM3
-K210-BURNER = ../tools/kflash.py
+IMG_DIR := ../fs-img-dir
+IMG_NAME = rootfs-ubifs-ze.img
+IMG := ${IMG_DIR}/$(IMG_NAME)
+IMG_LN = $(shell readlink -f $(IMG_DIR))/$(IMG_NAME)
 
-# Binutils
-OBJDUMP := rust-objdump --arch-name=riscv64
-OBJCOPY := rust-objcopy --binary-architecture=riscv64
+QEMU_2k1000_DIR=../util/qemu-2k1000/gz
+QEMU_2k1000=$(QEMU_2k1000_DIR)/runqemu
+U_IMG=$(IMG_DIR)/uImage
 
-# Disassembly
-DISASM ?= -x
-# build: env $(KERNEL_BIN) $(FS_IMG) fat32
-build: env $(KERNEL_BIN)
+LA_DEBUGGER_SERIAL_PORT = $$(python3 -m serial.tools.list_ports 1A86:7523 -q | head -n 1)
+LA_DEBUGGER_PORT_FREQ = $(LA_DEBUGGER_SERIAL_PORT) 115200
+LA_2k1000_SERIAL_PORT = $$(python3 -m serial.tools.list_ports 067B:2303 -q | head -n 1)
+LA_2k1000_PORT_FREQ = $(LA_2k1000_SERIAL_PORT) 115200
+MINITERM_START_CMD=python3 -m serial.tools.miniterm --dtr 0 --rts 0 --filter direct
 
-comp: build
-	@cp $(BOOTLOADER) $(BOOTLOADER).copy
-	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
-	@mv $(BOOTLOADER).copy $(KERNEL_BIN)
+LA_ENTRY_POINT = 0x9000000090000000
+LA_LOAD_ADDR = 0x9000000090000000
 
-env:
-	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
-#	cargo install cargo-binutils --vers ~0.2
-	rustup component add rust-src
-	rustup component add llvm-tools-preview
+run: env update-usr run-inner
 
-# build all user programs
-user:
-	@cd ../user && make
-c-user:
-	@cd ../user && make c-user
-rust-user:
-	@cd ../user && make rust-user
-# dev/zero永远输出0
-sdcard:
-    ifeq ($(findstring WSL, $(shell uname -a)), )
-		@echo "Are you sure write to $(SDCARD) ? \nYou may also specify another drive with the option \`SDCARD=/dev/<drive>\` [y/N] " && read ans && [ $${ans:-N} = y ]
-		./buildfs.sh "$(SDCARD)"
-    else
-		@echo "Are you sure write to E:/ ? [y/N] " && read ans && [ $${ans:-N} = y ]
-		@sudo mount ../easy-fs-fuse/fat32.img ../easy-fs-fuse/fs
-		@powershell.exe 'cd ../easy-fs-fuse; copy -Recurse -path "$$(pwd)/fs/*" -destination "E:/" -force'
-		@sudo umount ../easy-fs-fuse/fs
-    endif
+# 更新用户态程序
+update-usr: fs-img
 
+# 编译用户态程序
+user: env
+	@cd ../user && make rust-user BOARD=$(BOARD) MODE=$(MODE)
+
+# 生成根文件系统镜像
+fs-img: user
+ifeq ($(BOARD),laqemu)
+	@sudo rm -rf ../fs-img-dir
+	./buildfs.sh "$(IMG)" "laqemu" $(MODE) $(FS_MODE)
+else
+	./buildfs.sh "$(IMG)" 2k1000 $(MODE) $(FS_MODE)
+endif
+
+# 仅更新内核并运行
+run-inner: uimage do-run
+
+# 将内核转换为二进制文件
 $(KERNEL_BIN): kernel
-	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
+	@$(OBJCOPY) $(KERNEL_ELF) $@ --strip-all -O binary &
+	@$(OBJDUMP) $(KERNEL_ELF) -SC > target/$(TARGET)/$(MODE)/asm_all.txt
+	@$(READELF) -ash $(KERNEL_ELF) > target/$(TARGET)/$(MODE)/sec.txt &
 
-$(APPS):
-
-fat32:
-	./buildfs.sh "$(U_FAT32_DIR)/fat32.img"
-
-ext4:
-	./buildfs_ext4.sh "$(U_EXT4_DIR)/ext4.img"
-
-fsimg-format:
-	sudo mkfs.vfat -F 32 ${U_FAT32}
-
-bootloader:
-	@cd ../rustsbi-k210 && cargo build --release
-	@$(OBJCOPY) $(RUSTSBI_K210_ELF) --strip-all -O binary ../bootloader/rustsbi-k210.bin
-	@$(OBJDUMP) -S $(RUSTSBI_K210_ELF) > ../bootloader/rustsbi-k210.S
+# 编译内核
 kernel:
 	@echo Platform: $(BOARD)
-	@cp src/linker-$(BOARD).ld src/linker.ld
-    ifdef COMP
-		@cargo build $(RELEASE) --features "comp"
+    ifeq ($(MODE), debug)
+		@cargo build --no-default-features --features "comp board_$(BOARD) block_$(BLOCK) $(LOG_OPTION)" --target $(TARGET)
     else
-        ifeq ($(MODE), debug)
-			@cargo build --features "board_$(BOARD) $(LOG_OPTION)"
-        else
-			@cargo build --release --features "board_$(BOARD) $(LOG_OPTION)"
-        endif
+		@cargo build --no-default-features --release --features "comp board_$(BOARD) block_$(BLOCK) $(LOG_OPTION)"  --target $(TARGET)
     endif
-	@rm src/linker.ld
 
+# 更新内核
+uimage: env $(KERNEL_BIN)
+	../util/mkimage -A loongarch -O linux -T kernel -C none -a $(LA_LOAD_ADDR) -e $(LA_ENTRY_POINT) -n NPUcore+ -d $(KERNEL_BIN) $(KERNEL_UIMG)
+	-@sudo rm $(U_IMG)
+	@sudo cp -f $$(pwd)/target/$(TARGET)/$(MODE)/os.ui $(U_IMG)
+
+do-run:
+ifeq ($(BOARD), laqemu)
+# 将镜像链接到指定目录
+	-ln -sf $(IMG_LN) $(QEMU_2k1000_DIR)/$(IMG_NAME)
+	@echo "========WARNING!========"
+	@echo "下一个命令是修改后的runqemu2k1000脚本，其中任何潜在的和隐式的“当前工作目录”已被生成的脚本存储路径所替换。"
+	@./run_script $(QEMU_2k1000)
+else ifeq ($(BOARD), 2k1000)
+	@./run_script $(MINITERM_START_CMD) $(LA_2k1000_PORT_FREQ)
+endif
+
+# 生成根文件系统镜像并编译内核
+all: fs-img uimage mv
+mv:
+	mv $(KERNEL_BIN) ../kernel.bin
+
+gdb:
+ifeq ($(BOARD),laqemu)
+	./run_script $(QEMU_2k1000) "-S"
+else ifeq ($(BOARD), 2k1000)
+	@./la_gdbserver minicom -D $(LA_DEBUGGER_PORT_FREQ)
+endif
+
+env: # 切换工具链
+	-(rustup target list | grep "$(TARGET) (installed)") || rustup target add $(TARGET)
+	if ! dpkg -s expect > /dev/null 2>&1; then sudo apt-get install -y expect; fi
 
 clean:
 	@cargo clean
+	@cd ../user && make clean
 
-run: run-inner
-
-run-inner: build do-run
-
-do-run:
-ifeq ($(BOARD), qemu)
-	@qemu-system-riscv64 \
-		-machine virt \
-		-nographic \
-		-bios $(BOOTLOADER) \
-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
-		-drive file=$(U_FAT32),if=none,format=raw,id=x0 \
-        -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0\
-		-smp threads=$(CORE_NUM)
-else
-	if [ ! -e "$(K210-BURNER)" ]; then (cd .. && git clone https://gitee.com/begehau/kflash.py.git && mv kflash.py tools) fi
-	@cp $(BOOTLOADER) $(BOOTLOADER).copy
-	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
-	@mv $(BOOTLOADER).copy $(KERNEL_BIN)
-    ifeq ($(findstring WSL, $(shell uname -a)), )
-		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
-		python3 $(K210-BURNER) -p $(K210-SERIALPORT-LINUX) -b 1500000 $(KERNEL_BIN)
-		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
-    else
-		powershell.exe 'usbipd wsl detach --all; python $(K210-BURNER) -p $(K210-SERIALPORT-WINDOWS) -b 1500000 $(KERNEL_BIN); (usbipd wsl list | findstr "$(K210-SERIALPORT-WINDOWS)") -match "\d-\d"; usbipd wsl attach --busid $$matches[0]'
-		@sleep 1
-		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
-		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
-    endif
-endif
-
-
-
-run-k210:
-	if [ ! -e "$(K210-BURNER)" ]; then (cd .. && git clone https://gitee.com/begehau/kflash.py.git && mv kflash.py tools) fi
-    ifeq ($(findstring WSL, $(shell uname -a)), )
-		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
-		python3 $(K210-BURNER) -p $(K210-SERIALPORT-LINUX) -b 1500000 $(KERNEL_BIN)
-		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
-    else
-		powershell.exe 'usbipd wsl detach --all; python $(K210-BURNER) -p $(K210-SERIALPORT-WINDOWS) -b 1500000 $(KERNEL_BIN); (usbipd wsl list | findstr "$(K210-SERIALPORT-WINDOWS)") -match "\d-\d"; usbipd wsl attach --busid $$matches[0]'
-		@sleep 1
-		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
-		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
-    endif
-
-run-ext4: build do-run-ext4
-
-do-run-ext4:
-ifeq ($(BOARD), qemu)
-	@qemu-system-riscv64 \
-		-machine virt \
-		-nographic \
-		-bios $(BOOTLOADER) \
-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
-		-drive file=$(U_EXT4),if=none,format=raw,id=x0 \
-        -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
-		-smp threads=$(CORE_NUM)
-else
-	if [ ! -e "$(K210-BURNER)" ]; then (cd .. && git clone https://gitee.com/begehau/kflash.py.git && mv kflash.py tools) fi
-	@cp $(BOOTLOADER) $(BOOTLOADER).copy
-	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
-	@mv $(BOOTLOADER).copy $(KERNEL_BIN)
-    ifeq ($(findstring WSL, $(shell uname -a)), )
-		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
-		python3 $(K210-BURNER) -p $(K210-SERIALPORT-LINUX) -b 1500000 $(KERNEL_BIN)
-		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
-    else
-		powershell.exe 'usbipd wsl detach --all; python $(K210-BURNER) -p $(K210-SERIALPORT-WINDOWS) -b 1500000 $(KERNEL_BIN); (usbipd wsl list | findstr "$(K210-SERIALPORT-WINDOWS)") -match "\d-\d"; usbipd wsl attach --busid $$matches[0]'
-		@sleep 1
-		@sudo chmod 777 $(K210-SERIALPORT-LINUX)
-		python3 -m serial.tools.miniterm --eol LF --dtr 0 --rts 0 --filter direct $(K210-SERIALPORT-LINUX) 115200
-    endif
-endif
-
-
-monitor:
-	riscv64-unknown-elf-gdb -ex 'file target/riscv64gc-unknown-none-elf/debug/os' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
-
-gdb:
-	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,\
-	file=target/riscv64gc-unknown-none-elf/debug/os,addr=0x80200000 -drive \
-	file=$(U_FAT32),if=none,format=raw,id=x0 \
-	-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -smp threads=$(CORE_NUM) -S -s # file=target/riscv64gc-unknown-none-elf/$(MODE)/os,addr=0x80200000 -drive
-
-gdb-ext4:
-	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,\
-	file=target/riscv64gc-unknown-none-elf/debug/os,addr=0x80200000 -drive \
-	file=$(U_EXT4),if=none,format=raw,id=x0 \
-	-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -smp threads=$(CORE_NUM) -S -s # file=target/riscv64gc-unknown-none-elf/$(MODE)/os,addr=0x80200000 -drive
-
-runsimple:
-	@qemu-system-riscv64 \
-		-machine virt \
-		-nographic \
-		-bios $(BOOTLOADER) \
-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
-		-drive file=$(U_FAT32),if=none,format=raw,id=x0 \
-        -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0\
-		-smp threads=$(CORE_NUM)
-
-release: build
-	@cp $(BOOTLOADER) $(BOOTLOADER).copy
-	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
-	@mv $(BOOTLOADER).copy $(TOP)
-
-
-easy-fs-doc:
-	cd ../easy-fs/ && cargo doc --no-deps --release --document-private-items
-	@cd ../os/
-	@./clear_doc.sh easy-fs
-
-os-doc:
-	cargo doc --no-deps --release --target riscv64gc-unknown-none-elf --document-private-items
-	@./clear_doc.sh os
-.PHONY: user fat32 ext4 run run-ext4
+.PHONY: user update gdb new-gdb monitor .FORCE

@@ -1,4 +1,4 @@
-use crate::fs::DiskInodeType;
+use crate::fs::{dirent::Dirent, DiskInodeType};
 use alloc::sync::Arc;
 
 use crate::{
@@ -59,10 +59,6 @@ impl File for Null {
         )
     }
 
-    fn get_statx(&self) -> crate::fs::Statx {
-        todo!()
-    }
-
     fn read_user(&self, offset: Option<usize>, buf: UserBuffer) -> usize {
         0
     }
@@ -72,12 +68,11 @@ impl File for Null {
     }
 
     fn get_file_type(&self) -> DiskInodeType {
-        // DiskInodeType::File
-        DiskInodeType::from_char('-')
+        DiskInodeType::File
     }
 
     fn info_dirtree_node(
-        &mut self,
+        &self,
         dirnode_ptr: alloc::sync::Weak<crate::fs::directory_tree::DirectoryTreeNode>,
     ) {
     }
@@ -111,7 +106,7 @@ impl File for Null {
         todo!()
     }
 
-    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<crate::fs::layout::Dirent> {
+    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<Dirent> {
         todo!()
     }
 

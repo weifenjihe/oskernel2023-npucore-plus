@@ -3,7 +3,7 @@
     .global einitproc
     .align 12
 sinitproc:
-    .incbin "../user/target/riscv64gc-unknown-none-elf/release/initproc"
+    .incbin "../user/target/loongarch64-unknown-linux-gnu/debug/initproc"
 einitproc:
     .align 12
 
@@ -12,6 +12,6 @@ einitproc:
     .global ebash
     .align 12
 sbash:
-    .incbin "../bash-5.1.16/bash"
+    .incbin "./bash"
 ebash:
     .align 12

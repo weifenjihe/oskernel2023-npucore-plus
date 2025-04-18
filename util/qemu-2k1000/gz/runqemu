@@ -1,0 +1,33 @@
+#!/bin/sh
+# filepath: /home/stl/osnational/oskernel2025-npucore-blossom/util/qemu-2k1000/gz/runqemu
+
+KERNEL_PATH=/home/stl/osnational/oskernel2025-npucore-blossom/kernel-la
+DISK_PATH=/home/stl/osnational/oskernel2025-npucore-blossom/sdcard-la.img
+
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+QEMU=~/la64tool/qemu/bin/qemu-system-loongarch64
+
+# 检查内核文件是否存在
+if [ ! -f "$KERNEL_PATH" ]; then
+    echo "Error: Kernel file '$KERNEL_PATH' not found!"
+    exit 1
+fi
+
+# 检查磁盘镜像是否存在
+if [ ! -f "$DISK_PATH" ]; then
+    echo "Error: Disk image '$DISK_PATH' not found!"
+    exit 1
+fi
+
+DEBUG_GMAC_PHYAD=0 "$QEMU" \
+    -kernel "$KERNEL_PATH" \
+    -m 1024 \
+    -nographic \
+    -smp 1 \
+    -drive file="$DISK_PATH",if=none,format=raw,id=x0 \
+    -device virtio-blk-pci,drive=x0 \
+    -device virtio-net-pci,netdev=net0 \
+    -netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555 \
+    -rtc base=utc \
+    -no-reboot \
+    -append "root=/dev/vda rw console=ttyS0"

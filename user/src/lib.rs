@@ -1,10 +1,14 @@
 #![no_std]
 #![feature(linkage)]
+#![feature(asm_experimental_arch)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
+#![feature(lang_items)]
 #[allow(dead_code)]
 #[macro_use]
 pub mod console;
+#[cfg(target_arch = "loongarch64")]
+mod la_libc_import;
 mod lang_items;
 mod syscall;
 mod usr_call;
@@ -13,10 +17,9 @@ extern crate alloc;
 #[macro_use]
 extern crate bitflags;
 
-use core::arch::asm;
-
 use alloc::vec::Vec;
 use buddy_system_allocator::LockedHeap;
+pub use core::arch::global_asm;
 pub use usr_call::*;
 
 const USER_HEAP_SIZE: usize = 32768;
@@ -31,21 +34,29 @@ pub fn handle_alloc_error(layout: core::alloc::Layout) -> ! {
     panic!("Heap allocation error, layout = {:?}", layout);
 }
 
+#[lang = "eh_personality"]
+extern "C" fn eh_personality() {}
+
 #[linkage = "weak"]
 #[no_mangle]
 #[link_section = ".text.entry"]
 pub extern "C" fn _start() -> ! {
-    let argc: usize;
-    let argv: usize;
-    unsafe {
-        asm!(
-            "ld a0, 0(sp)",
-            "add a1, sp, 8",
-            out("a0") argc,
-            out("a1") argv
-        );
+    #[cfg(target_arch = "loongarch64")]
+    {
+        use core::arch::asm;
+        let argc: usize;
+        let argv: usize;
+        unsafe {
+            asm!(
+                "ld.d $a0, $sp, 16",
+                "addi.d $a1, $sp, 24",
+                out("$a0") argc,
+                out("$a1") argv
+            );
+        }
+        _parameter(argc, argv);
     }
-    _parameter(argc, argv);
+    unreachable!();
 }
 
 #[linkage = "weak"]
@@ -77,7 +88,6 @@ pub extern "C" fn _parameter(argc: usize, argv: usize) -> ! {
 fn main(_argc: usize, _argv: &[&str]) -> i32 {
     panic!("Cannot find main!");
 }
-
 
 bitflags! {
     pub struct OpenFlags: u32 {

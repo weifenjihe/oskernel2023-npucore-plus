@@ -1,7 +1,7 @@
 use super::{__switch, do_wake_expired};
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
-use crate::trap::TrapContext;
+use crate::arch::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
 use spin::Mutex;
@@ -27,12 +27,14 @@ impl Processor {
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
     }
+    pub fn is_vacant(&self) -> bool {
+        self.current.is_none()
+    }
 }
 
 lazy_static! {
     pub static ref PROCESSOR: Mutex<Processor> = Mutex::new(Processor::new());
 }
-
 
 pub fn run_tasks() {
     loop {

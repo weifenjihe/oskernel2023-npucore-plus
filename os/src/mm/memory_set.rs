@@ -1,14 +1,14 @@
 use super::map_area::*;
 use super::page_table::PageTable;
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
+use crate::arch::TrapContext;
 use crate::arch::{MMIO, TICKS_PER_SEC};
-use crate::config::*;
 use crate::fs::SeekWhence;
 use crate::syscall::errno::*;
 use crate::task::{
     current_task, trap_cx_bottom_from_tid, ustack_bottom_from_tid, AuxvEntry, AuxvType, ELFInfo,
 };
-use crate::trap::TrapContext;
+use crate::{config::*, should_map_trampoline};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -30,10 +30,13 @@ extern "C" {
 }
 
 lazy_static! {
-    pub static ref KERNEL_SPACE: Arc<Mutex<MemorySet<crate::mm::PageTableImpl>>> =
+    /// 内核空间
+    pub static ref KERNEL_SPACE: Arc<Mutex<MemorySet<crate::mm::KernelPageTableImpl>>> =
         Arc::new(Mutex::new(MemorySet::new_kernel()));
 }
 
+/// Return the root PPN of kernel space
+#[allow(unused)]
 pub fn kernel_token() -> usize {
     KERNEL_SPACE.lock().token()
 }
@@ -67,6 +70,13 @@ pub struct MemorySet<T: PageTable> {
 
 impl<T: PageTable> MemorySet<T> {
     /// Create a new struct with no information at all.
+    pub fn new_bare_kern() -> Self {
+        Self {
+            page_table: T::new_kern_space(),
+            areas: Vec::with_capacity(16),
+        }
+    }
+    /// Create a new struct with no information at all.
     pub fn new_bare() -> Self {
         Self {
             page_table: T::new(),
@@ -95,17 +105,17 @@ impl<T: PageTable> MemorySet<T> {
         )
         .unwrap();
     }
-    /// Insert an anonymous segment containing the space between `start_va.floor()` to `end_va.ceil()`
-    /// The space is allocated and added to the current MemorySet.
-    /// # Prerequisite
-    /// Assuming no conflicts. In other words, the space is NOT checked for space validity or overlap.
-    /// It is merely mapped, pushed into the current memory set.
-    /// Since CoW is implemented, the space is NOT allocated until a page fault is triggered.
+    /// 插入一个匿名段，包含从start_va.floor()到end_va.ceil()之间的空间
+    /// 该空间被分配并被添加到当前的 MemorySet.
+    /// # 前提条件
+    /// 假设没有冲突，或者说，该空间不会检查空间有效性或者重叠
+    /// 它只是被映射并推入到当前 memory set中
+    /// 由于实现了写时复制（CoW），该空间不会在插入时分配，直到触发页面错误时才会进行分配。
     pub fn insert_program_area(
         &mut self,
-        start_va: VirtAddr,
-        permission: MapPermission,
-        frames: Vec<Frame>,
+        start_va: VirtAddr,             // 起始虚拟地址
+        permission: MapPermission,      // 内存区域访问权限
+        frames: Vec<Frame>,             // 内存帧状态
     ) -> Result<(), ()> {
         let map_area = MapArea::from_existing_frame(start_va, MapType::Framed, permission, frames);
         self.push_no_alloc(map_area)?;
@@ -129,7 +139,11 @@ impl<T: PageTable> MemorySet<T> {
         }
     }
     /// Push a not-yet-mapped map_area into current MemorySet and copy the data into it if any, allocating the needed memory for the map.
-    fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) -> Result<(), MemoryError> {
+    fn push(
+        &mut self,
+        mut map_area: MapArea,
+        data: Option<&[u8]>,
+    ) -> Result<(), (MemoryError, VirtPageNum)> {
         match data {
             Some(data) => {
                 let mut start = 0;
@@ -157,7 +171,7 @@ impl<T: PageTable> MemorySet<T> {
         mut map_area: MapArea,
         offset: usize,
         data: &[u8],
-    ) -> Result<(), MemoryError> {
+    ) -> Result<(), (MemoryError, VirtPageNum)> {
         let len = data.len();
         let mut vpn_iter = map_area.inner.vpn_range.into_iter();
         if let Some(vpn) = vpn_iter.next() {
@@ -218,12 +232,12 @@ impl<T: PageTable> MemorySet<T> {
         Ok(())
     }
     pub fn last_mmap_area_idx(&self) -> Option<usize> {
-        for (idx, area) in self.areas.iter().enumerate().rev().skip(2) {
+        for (idx, area) in self.areas.iter().enumerate().rev().skip(SKIP_NUM) {
             let start_vpn = area.get_start::<T>();
-            if start_vpn >= VirtAddr::from(MMAP_END).into() {
+            if start_vpn >= VirtAddr::from(USR_MMAP_END).into() {
                 continue;
-            } else if start_vpn >= VirtAddr::from(MMAP_BASE).into()
-                && start_vpn < VirtAddr::from(MMAP_END).into()
+            } else if start_vpn >= VirtAddr::from(USR_MMAP_BASE).into()
+                && start_vpn < VirtAddr::from(USR_MMAP_END).into()
             {
                 return Some(idx);
             } else {
@@ -299,10 +313,16 @@ impl<T: PageTable> MemorySet<T> {
                     let frame = area.inner.get_mut(&vpn);
                     let allocated_ppn = match frame {
                         // Page table is not mapped, but frame is in memory.
-                        Frame::InMemory(_) => unreachable!(),
+                        Frame::InMemory(_) => {
+                            info!("[Frame InMemory] addr: {:?}, vpn: {:?}, frame: {:?}", addr, vpn, frame);
+                            unreachable!();
+                        }
                         Frame::Unallocated => {
                             info!("[do_page_fault] addr: {:?}, solution: lazy alloc", addr);
-                            area.map_one_zeroed_unchecked(&mut self.page_table, vpn)
+                            let ppn = area.map_one_zeroed_unchecked(&mut self.page_table, vpn);
+                            let frame = area.inner.get_mut(&vpn);
+                            info!("[do_page_fault map_one] addr: {:?}, vpn: {:?}, frame: {:?}", addr, vpn, frame);
+                            ppn
                         }
                         #[cfg(feature = "oom_handler")]
                         Frame::Compressed(_) => {
@@ -358,7 +378,7 @@ impl<T: PageTable> MemorySet<T> {
             .iter_mut()
             .filter(|area| {
                 let start_vpn = area.get_start::<T>();
-                start_vpn.0 >= (MMAP_BASE >> PAGE_SIZE_BITS)
+                start_vpn.0 >= (USR_MMAP_BASE >> PAGE_SIZE_BITS)
                     && start_vpn.0 < (TASK_SIZE >> PAGE_SIZE_BITS)
                     && area.map_file.is_none()
             })
@@ -374,7 +394,7 @@ impl<T: PageTable> MemorySet<T> {
                 area.get_start::<T>().0 < (TASK_SIZE >> PAGE_SIZE_BITS) && area.map_file.is_none()
             })
             .map(|area| {
-                if area.get_start::<T>().0 < MMAP_BASE >> PAGE_SIZE_BITS {
+                if area.get_start::<T>().0 < USR_MMAP_BASE >> PAGE_SIZE_BITS {
                     area.force_swap(page_table)
                 } else {
                     area.do_oom(page_table)
@@ -398,12 +418,14 @@ impl<T: PageTable> MemorySet<T> {
             MapPermission::R | MapPermission::X | MapPermission::U,
         );
     }
-    /// Create an empty kernel space.
+    /// 创建一个空的内核空间
     /// Without kernel stacks. (Is it done with .bss?)
     pub fn new_kernel() -> Self {
-        let mut memory_set = Self::new_bare();
+        let mut memory_set = Self::new_bare_kern();
         // map trampoline
-        memory_set.map_trampoline();
+        if should_map_trampoline!() {
+            memory_set.map_trampoline();
+        }
         // map kernel sections
         println!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
         println!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
@@ -593,10 +615,11 @@ impl<T: PageTable> MemorySet<T> {
     pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, ELFInfo), isize> {
         let mut memory_set = Self::new_bare();
         // map trampoline
-        memory_set.map_trampoline();
+        if should_map_trampoline!() {
+            memory_set.map_trampoline();
+        }
         // map signaltrampoline
         memory_set.map_signaltrampoline();
-
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let (program_break, elf_info) = memory_set.map_elf(&elf)?;
 
@@ -605,7 +628,9 @@ impl<T: PageTable> MemorySet<T> {
     pub fn from_existing_user(user_space: &mut MemorySet<T>) -> MemorySet<T> {
         let mut memory_set = Self::new_bare();
         // map trampoline
-        memory_set.map_trampoline();
+        if should_map_trampoline!() {
+            memory_set.map_trampoline();
+        }
         // map signaltrampoline
         memory_set.map_signaltrampoline();
         // map data sections/user heap/mmap area/user stack
@@ -759,7 +784,7 @@ impl<T: PageTable> MemorySet<T> {
                 }
                 area.get_end::<T>().into()
             } else {
-                MMAP_BASE.into()
+                USR_MMAP_BASE.into()
             }
         };
         let mut new_area = MapArea::new(
@@ -785,14 +810,18 @@ impl<T: PageTable> MemorySet<T> {
             }
         }
         // insert MapArea and keep the order
-        let (idx, _) = self
+        if let Some((idx, _)) = self
             .areas
             .iter()
             .enumerate()
-            .skip_while(|(_, area)| area.get_start::<T>() >= VirtAddr::from(MMAP_END).into())
+            .skip_while(|(_, area)| area.get_start::<T>() >= VirtAddr::from(USR_MMAP_END).into())
             .find(|(_, area)| area.get_start::<T>() >= start_va.into())
-            .unwrap();
-        self.areas.insert(idx, new_area);
+        {
+            self.areas.insert(idx, new_area);
+        } else {
+            error!("[MemorySet::mmap] No area found higher than new_area {:?} in beginning address. TRAMPOLINES may have been mapped to wrong places!",new_area);
+            self.areas.push(new_area);
+        }
         start_va.0 as isize
     }
     pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), isize> {
@@ -1060,19 +1089,20 @@ impl<T: PageTable> MemorySet<T> {
     }
     pub fn alloc_user_res(&mut self, tid: usize, alloc_stack: bool) {
         if alloc_stack {
-            // alloc user stack
             let ustack_bottom = ustack_bottom_from_tid(tid);
             let ustack_top = ustack_bottom - USER_STACK_SIZE;
-            self.insert_framed_area(
-                ustack_top.into(),
-                ustack_bottom.into(),
-                MapPermission::R | MapPermission::W | MapPermission::U,
-            );
             trace!(
                 "[alloc_user_res] user stack start_va: {:X}, end_va: {:X}",
                 ustack_top,
                 ustack_bottom
             );
+            // alloc user stack
+            self.insert_framed_area(
+                ustack_top.into(),
+                ustack_bottom.into(),
+                MapPermission::R | MapPermission::W | MapPermission::U,
+            );
+            trace!("[alloc_user_res] done");
         } else {
             debug!(
                 "[alloc_user_res] user stack is not allocated (stack is designated in sys_clone)"
@@ -1116,7 +1146,7 @@ impl<T: PageTable> MemorySet<T> {
     }
 
     pub fn is_dirty(&self, ppn: PhysPageNum) -> Option<bool> {
-        self.page_table.is_dirty(ppn.0.into())
+        self.page_table.is_dirty((ppn.0).into())
     }
 }
 

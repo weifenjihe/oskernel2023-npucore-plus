@@ -1,13 +1,8 @@
-[build]
-target = "riscv64gc-unknown-none-elf"
-
-[target.riscv64gc-unknown-none-elf]
+[target.loongarch64-unknown-linux-gnu]
 rustflags = [
-    "-Clink-args=-Tsrc/linker.ld",
+    "-Clink-arg=-Tsrc/linker.ld",
+    "-Cforce-frame-pointers=yes",
+    "-Clink-arg=-nostdlib",
+    "-Clink-arg=-static"
 ]
-
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "../vendor"
+linker = "loongarch64-linux-gnu-gcc"

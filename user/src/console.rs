@@ -3,7 +3,7 @@ use core::fmt::{self, Write};
 const STDIN: usize = 0;
 const STDOUT: usize = 1;
 pub use super::getchar;
-use super::{read, write};
+use super::write;
 struct Stdout;
 
 impl Write for Stdout {

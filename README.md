@@ -1,1 +1,1 @@
-# 西北工业大学2025os参赛临时调试仓库
+# OSKernel2025-NPUcore-BLOSSOM(LoongArch)

@@ -1,6 +1,4 @@
-use core::mem::size_of;
-
-use crate::timer::TimeSpec;
+use crate::{arch::BLOCK_SZ, timer::TimeSpec};
 
 bitflags! {
     pub struct OpenFlags: u32 {
@@ -129,6 +127,7 @@ pub struct Stat {
 }
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
+/// Store the file attributes from a supported file.
 pub struct Statx {
     pub stx_mask: u32,
     pub stx_blksize: u32,
@@ -186,7 +185,7 @@ impl Statx {
         stx_dev_major: u32,
         stx_dev_minor: u32,
     ) -> Self {
-        const BLK_SIZE: u32 = 512;
+        const BLK_SIZE: u32 = BLOCK_SZ as u32;
         Self {
             stx_mask: stx_mask,
             stx_blksize: BLK_SIZE as u32,
@@ -228,7 +227,6 @@ impl Statx {
             __statx_pad2: 0,
             __statx_pad3: [0 as u64; 12],
         }
-        
     }
 }
 #[allow(unused)]
@@ -239,6 +237,27 @@ impl Stat {
     }
     pub fn get_size(&self) -> usize {
         self.st_size as usize
+    }
+    pub fn get_mode(&self) -> u32 {
+        self.st_mode
+    }
+    pub fn get_nlink(&self) -> u32 {
+        self.st_nlink
+    }
+    pub fn get_dev(&self) -> u32 {
+        self.st_dev as u32
+    }
+    pub fn get_rdev(&self) -> u32 {
+        self.st_rdev as u32
+    }
+    pub fn get_atime(&self) -> usize {
+        self.st_atime.tv_sec as usize
+    }
+    pub fn get_mtime(&self) -> usize {
+        self.st_mtime.tv_sec as usize
+    }
+    pub fn get_ctime(&self) -> usize {
+        self.st_ctime.tv_sec as usize
     }
 
     pub fn new(
@@ -252,7 +271,7 @@ impl Stat {
         st_mtime_sec: i64,
         st_ctime_sec: i64,
     ) -> Self {
-        const BLK_SIZE: u32 = 512;
+        const BLK_SIZE: u32 = BLOCK_SZ as u32;
         Self {
             st_dev,
             st_ino,
@@ -280,41 +299,5 @@ impl Stat {
             },
             __unused: 0,
         }
-    }
-}
-
-const NAME_LIMIT: usize = 128;
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-/// Native Linux directory entry structure.
-/// # Note
-/// In theory, the d_name may NOT have a fixed size and `d_name` may be arbitrarily lone.
-pub struct Dirent {
-    /// Inode number
-    pub d_ino: usize,
-    /// Offset to next `linux_dirent`
-    pub d_off: isize,
-    /// Length of this `linux_dirent`
-    pub d_reclen: u16,
-    /// Type of the file
-    pub d_type: u8,
-    /// The Filename (null-terminated)
-    /// # Note
-    /// We use fix-sized d_name array.
-    pub d_name: [u8; NAME_LIMIT],
-}
-
-impl Dirent {
-    /// Offset to next `linux_dirent`
-    pub fn new(d_ino: usize, d_off: isize, d_type: u8, d_name: &str) -> Self {
-        let mut dirent = Self {
-            d_ino,
-            d_off,
-            d_reclen: size_of::<Self>() as u16,
-            d_type,
-            d_name: [0; NAME_LIMIT],
-        };
-        dirent.d_name[0..d_name.len()].copy_from_slice(d_name.as_bytes());
-        dirent
     }
 }

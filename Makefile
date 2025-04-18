@@ -1,44 +1,38 @@
-PROJECT_DIR := $(shell pwd)
-MODE := release
+MODE ?= release
+FS_MODE ?= ext4
 
-MUSL_TOOLCHAIN_PREFIX := riscv64-linux-musl
-MUSL_TOOLCHAIN_DIR := $(PROJECT_DIR)/$(MUSL_TOOLCHAIN_PREFIX)-cross/bin
-MUSL_CC := $(MUSL_TOOLCHAIN_PREFIX)-gcc
-MUSL_AR := $(MUSL_TOOLCHAIN_PREFIX)-ar
-MUSL_OBJCOPY := $(MUSL_TOOLCHAIN_PREFIX)-objcopy
+all: clean
+	cd os && make all
+	cp os/target/loongarch64-unknown-linux-gnu/debug/os kernel-la
 
-BASH_DIR := $(PROJECT_DIR)/bash-5.1.16
-BASH := $(BASH_DIR)/bash
+kernel:
+	cd os && make kernel
 
-USER_DIR := $(PROJECT_DIR)/user
-INITPROC_SRC := $(USER_DIR)/src/bin/initproc.rs
-INITPROC := $(USER_DIR)/target/riscv64gc-unknown-none-elf/$(MODE)/initproc
-BOOTLOADER := bootloader/fw_jump.bin
+run:
+	cd os && make run
 
-OS_DIR := $(PROJECT_DIR)/os
-KERNEL := $(OS_DIR)/target/riscv64gc-unknown-none-elf/$(MODE)/os
+runsimple:
+	cd os && make runsimple
 
-export PATH := $(PATH):$(MUSL_TOOLCHAIN_DIR)
+change-kernel-only:
+	cd os && make build && make runsimple
 
-all: $(KERNEL)
-
-$(INITPROC): $(INITPROC_SRC)
-	cd $(USER_DIR) && make
-
-$(BASH):
-	cd $(BASH_DIR) && make 
-	$(MUSL_OBJCOPY) --strip-debug $(BASH)
-
-$(KERNEL): $(INITPROC) $(BASH)
-	cd $(OS_DIR) && make comp BOARD=qemu COMP=true MODE=$(MODE)
+qemu-download:
+	mkdir -p util/qemu-2k1000/tmp
+	cd util/qemu-2k1000/tmp && wget https://gitlab.educg.net/wangmingjian/os-contest-2024-image/-/raw/master/qemu-2k1000-static.20240526.tar.xz
+	cd util/qemu-2k1000/tmp && tar xavf qemu-2k1000-static.20240526.tar.xz
+	rm -rf util/qemu-2k1000/tmp/qemu-2k1000-static.20240526.tar.xz
+	rm -rf util/qemu-2k1000/tmp/qemu/2k1000
+	rm -rf util/qemu-2k1000/tmp/qemu/runqemu
+	rm -rf util/qemu-2k1000/tmp/qemu/README.md
+	rm -rf util/qemu-2k1000/tmp/qemu/include
+	rm -rf util/qemu-2k1000/tmp/qemu/var
+	mkdir -p fs-img-dir
+	sudo chmod 777 fs-img-dir/
+	chmod +x util/mkimage
+	chmod +x util/qemu-2k1000/gz/runqemu2k1000
+	chmod +x util/qemu-2k1000/tmp/qemu/bin/qemu-system-loongarch64
 
 clean:
-	cd $(OS_DIR) && make clean
-	cd $(USER_DIR) && make clean
-
-run: all
-	qemu-system-riscv64 -machine virt -kernel kernel-qemu -m 128M -nographic -smp 2 -bios sbi-qemu -drive file=sdcard.img,if=none,format=raw,id=x0  -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -device virtio-net-device,netdev=net -netdev user,id=net
-
-dbg: 
-	make all MODE=debug
-	qemu-system-riscv64 -machine virt -kernel kernel-qemu -m 128M -nographic -smp 2 -bios sbi-qemu -drive file=sdcard.img,if=none,format=raw,id=x0  -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -device virtio-net-device,netdev=net -netdev user,id=net -S -s
+	cd os && make clean
+.PHONY: all kernel run clean

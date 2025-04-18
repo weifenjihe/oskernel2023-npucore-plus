@@ -1,7 +1,7 @@
 use alloc::sync::{Arc, Weak};
 
 use crate::{
-    fs::{file_trait::File, DiskInodeType},
+    fs::{dirent::Dirent, file_trait::File, DiskInodeType},
     syscall::errno::ENOTDIR,
 };
 
@@ -57,15 +57,11 @@ impl File for Socket {
         todo!()
     }
 
-    fn get_statx(&self) -> crate::fs::Statx {
-        todo!()
-    }
-
     fn get_file_type(&self) -> DiskInodeType {
         todo!()
     }
 
-    fn info_dirtree_node(&mut self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
+    fn info_dirtree_node(&self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
         todo!()
     }
 
@@ -98,7 +94,7 @@ impl File for Socket {
         todo!()
     }
 
-    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<crate::fs::Dirent> {
+    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<Dirent> {
         todo!()
     }
 

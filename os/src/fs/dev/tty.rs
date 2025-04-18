@@ -1,5 +1,6 @@
 use crate::arch::console_getchar;
 use crate::fs::directory_tree::DirectoryTreeNode;
+use crate::fs::dirent::Dirent;
 use crate::fs::file_trait::File;
 use crate::fs::layout::Stat;
 use crate::fs::DiskInodeType;
@@ -226,17 +227,12 @@ impl File for Teletype {
         )
     }
 
-    fn get_statx(&self) -> crate::fs::Statx {
-        todo!()
-    }
-
     fn get_file_type(&self) -> DiskInodeType {
-        DiskInodeType::from_char('-')
-        // DiskInodeType::File
+        DiskInodeType::File
     }
 
     fn info_dirtree_node(
-        &mut self,
+        &self,
         dirnode_ptr: alloc::sync::Weak<crate::fs::directory_tree::DirectoryTreeNode>,
     ) {
     }
@@ -270,7 +266,7 @@ impl File for Teletype {
         todo!()
     }
 
-    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<crate::fs::layout::Dirent> {
+    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<Dirent> {
         todo!()
     }
 

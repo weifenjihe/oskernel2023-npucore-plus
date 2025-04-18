@@ -1,15 +1,19 @@
-#[cfg(feature = "rv64")]
-mod rv64;
-#[cfg(feature = "rv64")]
-pub use rv64::{
-    board::BlockDeviceImpl,
+#[cfg(feature = "la64")]
+mod la64;
+#[cfg(feature = "la64")]
+pub use la64::{
+    board,
     board::MMIO,
-    bootstrap_init, config, console_flush, console_getchar, console_putchar, machine_init,
-    set_timer, shutdown,
+    bootstrap_init, config,
+    config::BUFFER_CACHE_NUM,
+    console_flush, console_getchar, console_putchar, machine_init, shutdown,
     time::{get_clock_freq, get_time, TICKS_PER_SEC},
-    PageTableImpl, __switch, syscall_id, tlb_invalidate,
+    KernelPageTableImpl, PageTableImpl, __switch, syscall_id, 
+    // tlb_global_invalidate,
+    tlb_invalidate,
     trap::{
-        self, get_bad_instruction, get_exception_cause, ExceptionImpl, InterruptImpl, TrapImpl,
+        get_bad_addr, get_bad_instruction, get_exception_cause, trap_handler, trap_return,
+        MachineContext, TrapContext, TrapImpl, UserContext,
     },
-    BLOCK_SZ,
+    trap_cx_bottom_from_tid, ustack_bottom_from_tid, KernelStack, BLOCK_SZ,
 };

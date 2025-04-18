@@ -1,3 +1,4 @@
+use crate::arch::BLOCK_SZ;
 use crate::fs::poll::{ppoll, pselect, FdSet, PollFd};
 use crate::fs::*;
 use crate::mm::{
@@ -11,12 +12,130 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use log::{debug, error, info, trace, warn};
+use core::panic;
+use log::{debug, info, trace, warn};
 use num_enum::FromPrimitive;
 
 use super::errno::*;
 
 pub const AT_FDCWD: usize = 100usize.wrapping_neg();
+
+// todo
+pub fn sys_splice(
+    fd_in: usize,
+    off_in: *mut usize,
+    fd_out: usize,
+    off_out: *mut usize,
+    len: usize,
+    _flags: u32,
+) -> isize {
+    let task = current_task().unwrap();
+    let fd_table = task.files.lock();
+    let in_file = match fd_table.get_ref(fd_in) {
+        Ok(file_descriptor) => file_descriptor,
+        Err(errno) => return errno,
+    };
+    let out_file = match fd_table.get_ref(fd_out) {
+        Ok(file_descriptor) => file_descriptor,
+        Err(errno) => return errno,
+    };
+    info!("[sys_splice] outfd: {}, in_fd: {}", fd_out, fd_in);
+    if !in_file.readable() || !out_file.writable() {
+        return EBADF;
+    }
+    info!("[sys_splice] off_in: {:?}, off_out: {:?}", off_in, off_out);
+    // a buffer in kernel
+    const BUFFER_SIZE: usize = 4096;
+    let mut buffer = Vec::<u8>::with_capacity(BUFFER_SIZE);
+    let mut buffer_ptr: Option<&[u8]> = None;
+
+    let token = task.get_user_token();
+    // turn a pointer in user space into a pointer in kernel space if it is not null
+    let off_in = if off_in.is_null() {
+        off_in
+    } else {
+        match translated_refmut(token, off_in) {
+            Ok(offset) => {
+                if (*offset as isize) < 0 {
+                    return EINVAL;
+                };
+                offset as *mut usize
+            }
+            Err(errno) => return errno,
+        }
+    };
+    let off_out = if off_out.is_null() {
+        off_out
+    } else {
+        match translated_refmut(token, off_out) {
+            Ok(offset) => {
+                if (*offset as isize) < 0 {
+                    return EINVAL;
+                };
+                offset as *mut usize
+            }
+            Err(errno) => return errno,
+        }
+    };
+
+    let mut left_bytes = len;
+    loop {
+        let write_buffer = match buffer_ptr {
+            Some(buffer_ptr) => buffer_ptr,
+            None => {
+                unsafe {
+                    buffer.set_len(left_bytes.min(BUFFER_SIZE));
+                }
+                let read_size = in_file.read(unsafe { off_in.as_mut() }, buffer.as_mut_slice());
+                if (read_size as isize) < 0 {
+                    let errno = read_size as isize;
+                    return errno;
+                } else if read_size == 0 {
+                    break;
+                }
+                unsafe {
+                    buffer.set_len(read_size);
+                }
+                buffer.as_slice()
+            }
+        };
+
+        let read_size = write_buffer.len();
+
+        // let fallback = |redundant_bytes: usize| unsafe {
+        //     let offset = offset.as_mut();
+        //     match offset {
+        //         Some(offset) => {
+        //             *offset -= redundant_bytes;
+        //         }
+        //         None => match in_file.lseek(-(redundant_bytes as isize), SeekWhence::SEEK_CUR) {
+        //             Ok(_) => {}
+        //             Err(errno) => panic!("failed! errno {}", errno),
+        //         },
+        //     }
+        // };
+
+        let write_size = out_file.write(unsafe { off_out.as_mut() }, write_buffer);
+        if (write_size as isize) < 0 {
+            // fallback(read_size);
+            let errno = read_size as isize;
+            return errno;
+        } else if write_size == 0 {
+            // fallback(read_size);
+            break;
+        }
+
+        buffer_ptr = if write_size < read_size {
+            Some(&write_buffer[write_size..])
+        } else {
+            None
+        };
+        left_bytes -= write_size;
+    }
+    let send_size = len - left_bytes;
+    info!("[sys_sendfile] send bytes: {}", send_size);
+    send_size as isize
+}
 
 /// # Warning
 /// `fs` & `files` is locked in this function
@@ -311,6 +430,7 @@ pub fn sys_sendfile(out_fd: usize, in_fd: usize, offset: *mut usize, count: usiz
     const BUFFER_SIZE: usize = 4096;
     let mut buffer = Vec::<u8>::with_capacity(BUFFER_SIZE);
     let mut buffer_ptr: Option<&[u8]> = None;
+
     let mut left_bytes = count;
     loop {
         let write_buffer = match buffer_ptr {
@@ -357,7 +477,7 @@ pub fn sys_sendfile(out_fd: usize, in_fd: usize, offset: *mut usize, count: usiz
             fallback(read_size);
             break;
         }
-        
+
         buffer_ptr = if write_size < read_size {
             Some(&write_buffer[write_size..])
         } else {
@@ -429,7 +549,6 @@ pub fn sys_pipe2(pipefd: usize, flags: u32) -> isize {
     let token = task.get_user_token();
     if copy_to_user_array(
         token,
-        // [write_fd as u32, read_fd as u32].as_ptr(),
         [read_fd as u32, write_fd as u32].as_ptr(),
         pipefd as *mut u32,
         2,
@@ -443,14 +562,24 @@ pub fn sys_pipe2(pipefd: usize, flags: u32) -> isize {
         "[sys_pipe2] read_fd: {}, write_fd: {}, flags: {:?}",
         read_fd, write_fd, flags
     );
-    // print!("success");
     SUCCESS
 }
 
+/// 系统调用sys_getdents64
+/// # 说明
+/// + 用于获取目录项
+/// # 参数
+/// + fd：文件描述符
+/// + dirp：用于存储获取到的目录项的指针
+/// + count：要获取的目录项的数量
+/// # 返回值
+/// + 成功：返回获取的目录项数量
+/// + 失败：返回错误码
 pub fn sys_getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     let task = current_task().unwrap();
     let token = task.get_user_token();
 
+    // 获取文件描述符
     let file_descriptor = match fd {
         AT_FDCWD => task.fs.lock().working_inode.as_ref().clone(),
         fd => {
@@ -461,10 +590,12 @@ pub fn sys_getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
             }
         }
     };
+    // 获取目录项向量
     let dirent_vec = match file_descriptor.get_dirent(count) {
         Ok(vec) => vec,
         Err(errno) => return errno,
     };
+    // 将结果复制到用户态的数组中
     if copy_to_user_array(
         token,
         dirent_vec.as_ptr(),
@@ -477,6 +608,7 @@ pub fn sys_getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
         return EFAULT;
     };
     info!("[sys_getdents64] fd: {}, count: {}", fd, count);
+    // 返回获取的目录项数量
     (dirent_vec.len() * size_of::<Dirent>()) as isize
 }
 
@@ -639,6 +771,50 @@ pub fn sys_fstatat(dirfd: usize, path: *const u8, buf: *mut u8, flags: u32) -> i
         Err(errno) => errno,
     }
 }
+/// warning: 此函数没有完全实现，没有实现根据mask来填充statx的值，并且没有直接维护statx结构体，通过stat结构体间接实现
+pub fn sys_statx(dirfd: usize, path: *const u8, flags: u32, mask: u32, buf: *mut u8) -> isize {
+    let token = current_user_token();
+    let path = match translated_str(token, path) {
+        Ok(path) => path,
+        Err(errno) => return errno,
+    };
+    let flags = match FstatatFlags::from_bits(flags) {
+        Some(flags) => flags,
+        None => {
+            warn!("[sys_statx] unknown flags");
+            return EINVAL;
+        }
+    };
+
+    info!(
+        "[sys_statx] dirfd: {}, path: {:?}, flags: {:?}",
+        dirfd as isize, path, flags,
+    );
+
+    let task = current_task().unwrap();
+    let file_descriptor = match dirfd {
+        AT_FDCWD => task.fs.lock().working_inode.as_ref().clone(),
+        fd => {
+            let fd_table = task.files.lock();
+            match fd_table.get_ref(fd) {
+                Ok(file_descriptor) => file_descriptor.clone(),
+                Err(errno) => return errno,
+            }
+        }
+    };
+
+    match file_descriptor.open(&path, OpenFlags::O_RDONLY, false) {
+        Ok(file_descriptor) => {
+            if copy_to_user(token, &file_descriptor.get_statx(mask), buf as *mut Statx).is_err() {
+                log::error!("[sys_statx] Failed to copy to {:?}", buf);
+                return EFAULT;
+            };
+            log::debug!("[sys_statx] statx:\n{:?}", file_descriptor.get_statx(mask));
+            SUCCESS
+        }
+        Err(errno) => errno,
+    }
+}
 
 pub fn sys_fstat(fd: usize, statbuf: *mut u8) -> isize {
     let task = current_task().unwrap();
@@ -695,7 +871,7 @@ pub struct Statfs {
 pub fn sys_statfs(_path: *const u8, buf: *mut Statfs) -> isize {
     let statfs = Box::new(Statfs {
         f_type: 0xf2f52010,
-        f_bsize: 512,
+        f_bsize: BLOCK_SZ,
         f_blocks: 10000,
         f_bfree: 9000,
         f_bavail: 9000,
@@ -724,6 +900,12 @@ pub fn sys_fsync(fd: usize) -> isize {
         return errno;
     }
     SUCCESS
+}
+
+pub fn sys_fchmodat() -> isize {
+    // baseline 未完成这个函数
+    println!("[kernel in sys_fchmodat] chmod is not supported for now!\n");
+    0
 }
 
 pub fn sys_chdir(path: *const u8) -> isize {
@@ -768,13 +950,10 @@ pub fn sys_openat(dirfd: usize, path: *const u8, flags: u32, mode: u32) -> isize
     let mut fd_table = task.files.lock();
     let file_descriptor = match dirfd {
         AT_FDCWD => task.fs.lock().working_inode.as_ref().clone(),
-        fd => {
-            // let fd_table = task.files.lock();
-            match fd_table.get_ref(fd) {
-                Ok(file_descriptor) => file_descriptor.clone(),
-                Err(errno) => return errno,
-            }
-        }
+        fd => match fd_table.get_ref(fd) {
+            Ok(file_descriptor) => file_descriptor.clone(),
+            Err(errno) => return errno,
+        },
     };
 
     let new_file_descriptor = match file_descriptor.open(&path, flags, false) {

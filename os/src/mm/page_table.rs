@@ -5,19 +5,27 @@ use super::{MapPermission, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageN
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[allow(unused)]
 pub trait PageTable {
-    #[allow(unused)]
     /// Map the `vpn` to `ppn` with the `flags`.
     /// # Note
     /// Allocation should be done elsewhere.
     /// # Exceptions
     /// Panics if the `vpn` is mapped.
     fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: MapPermission);
+    #[inline(always)]
+    fn map_identical(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: MapPermission) {
+        self.map(vpn, ppn, flags)
+    }
     #[allow(unused)]
     /// Unmap the `vpn` to `ppn` with the `flags`.
     /// # Exceptions
     /// Panics if the `vpn` is NOT mapped (invalid).
     fn unmap(&mut self, vpn: VirtPageNum);
+    #[inline(always)]
+    fn unmap_identical(&mut self, vpn: VirtPageNum) {
+        self.unmap(vpn)
+    }
     /// Translate the `vpn` into its corresponding `Some(PageTableEntry)` if exists
     /// `None` is returned if nothing is found.
     fn translate(&self, vpn: VirtPageNum) -> Option<PhysPageNum>;
@@ -35,6 +43,13 @@ pub trait PageTable {
     fn clear_access_bit(&mut self, vpn: VirtPageNum) -> Result<(), ()>;
     fn clear_dirty_bit(&mut self, vpn: VirtPageNum) -> Result<(), ()>;
     fn new() -> Self;
+    #[inline(always)]
+    fn new_kern_space() -> Self
+    where
+        Self: Sized,
+    {
+        Self::new()
+    }
     /// Create an empty page table from `satp`
     /// # Argument
     /// * `satp` Supervisor Address Translation & Protection reg. that points to the physical page containing the root page.
@@ -47,6 +62,11 @@ pub trait PageTable {
     fn readable(&self, vpn: VirtPageNum) -> Option<bool>;
     fn writable(&self, vpn: VirtPageNum) -> Option<bool>;
     fn executable(&self, vpn: VirtPageNum) -> Option<bool>;
+}
+
+#[allow(unused)]
+pub fn gen_start_end(start: VirtAddr, end: VirtAddr) -> (VirtPageNum, VirtPageNum) {
+    (start.floor(), end.ceil())
 }
 
 /// if `existing_vec == None`, a empty `Vec` will be created.
@@ -83,6 +103,10 @@ pub fn translated_byte_buffer_append_to_existing_vec(
     Ok(())
 }
 
+pub fn ptf_ok(ptf: usize) -> bool {
+    ptf & 1 == 1
+}
+
 pub fn translated_byte_buffer(
     token: usize,
     ptr: *const u8,
@@ -113,6 +137,13 @@ pub fn translated_byte_buffer(
         start = end_va.into();
     }
     Ok(v)
+}
+
+pub fn get_right_aligned_bytes<T>(ptr: *const T) -> usize {
+    let ptr = ptr as usize;
+    let align = core::mem::align_of::<T>();
+    let mask = align - 1;
+    (align - (ptr & mask)) & mask
 }
 
 /// Load a string from other address spaces into kernel space without an end `\0`.
@@ -161,15 +192,10 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> Result<&'static mut T,
     };
     Ok(pa.get_mut())
 }
-/// A buffer in user space. Kernel space code may use this struct to copy to/ read from user space.
-/// This struct is meaningless in case that the kernel page is present in the user side MemorySet.
+
 pub struct UserBuffer {
-    /// The segmented array, or, a "vector of vectors".
-    /// # Design Information
-    /// In Rust, reference lifetime is a must for this template.
-    /// The lifetime of buffers is `static` because the buffer 'USES A' instead of 'HAS A'
     pub buffers: Vec<&'static mut [u8]>,
-    /// The total size of the Userbuffer.
+
     pub len: usize,
 }
 
@@ -217,10 +243,38 @@ impl UserBuffer {
         self.len
     }
 
-    /// Write to `self` starting at `offset`, and return written bytes.
-    /// This funtion will try to write as much as possible data
-    /// in the limit of `self.len()` and `src.len()`.
-    /// It guarantees that won't read/write out of bound.
+    pub fn read_at(&self, offset: usize, dst: &mut [u8]) -> usize {
+        if offset >= self.len {
+            return 0;
+        }
+        let mut read_bytes = 0usize;
+        let mut dst_start = 0usize;
+        for buffer in self.buffers.iter() {
+            let dst_end = dst_start + buffer.len();
+            //we can image mapping 'dst' categories to 'src' categories
+            //then we just need to intersect two intervals to get the corresponding interval
+            let copy_dst_start = dst_start.max(offset);
+            //we may worry about overflow,
+            //but we can guarantee that offset(we have checked before) and
+            //dst.len()(because of limited memory) won't be too large
+            let copy_dst_end = dst_end.min(dst.len() + offset);
+            if copy_dst_start >= copy_dst_end {
+                dst_start = dst_end; //don't forget to update dst_start
+                continue;
+            }
+            //mapping 'dst' categories to 'src' categories
+            let copy_src_start = copy_dst_start - offset;
+            let copy_src_end = copy_dst_end - offset;
+            //mapping 'dst' categories to 'buffer' categories
+            let copy_buffer_start = copy_dst_start - dst_start;
+            let copy_buffer_end = copy_dst_end - dst_start;
+            dst[copy_src_start..copy_src_end]
+                .copy_from_slice(&buffer[copy_buffer_start..copy_buffer_end]);
+            read_bytes += copy_dst_end - copy_dst_start;
+            dst_start = dst_end; //don't forget to update dst_start
+        }
+        read_bytes
+    }
     pub fn write_at(&mut self, offset: usize, src: &[u8]) -> usize {
         if offset >= self.len {
             return 0;
@@ -329,7 +383,9 @@ impl Iterator for UserBufferIterator {
         }
     }
 }
-
+pub fn get_add_one<T: StepByOne>(ptr: *const T) {
+    //TODO!
+}
 /// Copy `*src: T` to kernel space.
 /// `src` is a pointer in user space, `dst` is a pointer in kernel space.
 pub fn copy_from_user<T: 'static + Copy>(
@@ -348,7 +404,20 @@ pub fn copy_from_user<T: 'static + Copy>(
     }
     Ok(())
 }
-
+// pub fn copy_right_aligned<T: Copy>(token: usize, src: *const T, dst: *mut T) -> Result<(), isize> {
+// 	let size = core::mem::size_of::<T>();
+// 	let right_aligned_bytes = get_right_aligned_bytes(src);
+// 	if right_aligned_bytes == 0 {
+// 		copy_from_user(token, src, dst)?;
+// 	} else {
+// 		let mut buffer = translated_byte_buffer(token, src as *const u8, size + right_aligned_bytes)?;
+// 		let buffer = &mut buffer[0];
+// 		unsafe {
+// 			core::ptr::copy_nonoverlapping(buffer.as_ptr(), dst as *mut u8, size);
+// 		}
+// 	}
+// 	Ok(())
+// }
 /// Copy array `*src: [T;len]` to kernel space.
 /// `src` is a pointer in user space, `dst` is a pointer in kernel space.
 pub fn copy_from_user_array<T: 'static + Copy>(

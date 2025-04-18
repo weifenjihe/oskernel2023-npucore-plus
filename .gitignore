@@ -1,20 +1,36 @@
 # cargo config
 os/Cargo.lock
 user/Cargo.lock
-os/src/linker.ld
+# os/src/linker.ld
+os/new_cmd
 
 # IDE config
 .idea/
+.vscode/
 
 # kernel build
 os/target/
+
+#fs-img-dir
+fs-img-dir/
+/fs-img-dir/rootfs-ubifs-ze.img
+/fs-img-dir/uImage
+
+# util
+util/qemu-2k1000/tmp/
 
 # user programs build
 user/riscv64/
 user/target/
 
+# Gathering place of images
+easy-fs-fuse/
+
 # a copy of user programs debug build in "user/target/*"(for gdb)
 os/user/
+
+#gdb script
+os/gdb_script
 
 # developing, should be invisible in main branch
 os/src/fs/fatfs/*
@@ -27,12 +43,15 @@ os/last-*
 tools/
 user/.ccls-cache/
 
-# Doc .org
+# Doc .org & .tex
+Doc/
 Doc/**/*.org
+Doc/**/*.tex
+Doc/**/*.jpg
+Doc/**/*.png
 
-# for qemu comp
-kernel-qemu
-sbi-qemu
-sdcard.img
-
+kernel.bin
+kernel-la
 os.bin
+gdb-12.1
+sdcard-la.img

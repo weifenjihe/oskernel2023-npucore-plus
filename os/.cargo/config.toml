@@ -1,13 +1,9 @@
 [build]
-target = "riscv64gc-unknown-none-elf"
+target = "loongarch64-unknown-linux-gnu"
 
-[target.riscv64gc-unknown-none-elf]
-rustflags = [
-    "-Clink-arg=-Tsrc/linker.ld", "-Cforce-frame-pointers=yes"
-]
+[target.loongarch64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-Tsrc/linker.ld", "-Clink-arg=-nostdlib", "-Clink-arg=-static"]
+# Add "-Ctarget-feature=-unaligned-access" when ready.
+linker = "loongarch64-linux-gnu-gcc"
 
-[source.crates-io]
-replace-with = "vendored-sources"
 
-[source.vendored-sources]
-directory = "./vendor"

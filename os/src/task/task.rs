@@ -5,19 +5,22 @@ use super::threads::Futex;
 use super::trap_cx_bottom_from_tid;
 use super::ustack_bottom_from_tid;
 use super::TaskContext;
-use super::{pid_alloc, KernelStack, PidHandle};
+use super::{pid_alloc, KernelStackImpl, PidHandle};
 use crate::arch::TrapImpl;
+use crate::arch::{trap_handler, TrapContext};
 use crate::config::MMAP_BASE;
-use crate::fs::{FdTable, FileDescriptor, OpenFlags, ROOT_FD};
+use crate::fs::file_descriptor::FdTable;
+use crate::fs::{FileDescriptor, OpenFlags, ROOT_FD};
 use crate::mm::{MemorySet, PageTableImpl, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::net::SocketTable;
 use crate::syscall::CloneFlags;
 use crate::timer::{ITimerVal, TimeVal};
-use crate::trap::{trap_handler, TrapContext};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::fmt::{self, Debug, Formatter};
+use log::trace;
 use spin::{Mutex, MutexGuard};
 
 #[derive(Clone)]
@@ -30,7 +33,7 @@ pub struct TaskControlBlock {
     pub pid: PidHandle,
     pub tid: usize,
     pub tgid: usize,
-    pub kstack: KernelStack,
+    pub kstack: KernelStackImpl,
     pub ustack_base: usize,
     pub exit_signal: Signals,
     // mutable
@@ -39,6 +42,7 @@ pub struct TaskControlBlock {
     pub exe: Arc<Mutex<FileDescriptor>>,
     pub tid_allocator: Arc<Mutex<RecycleAllocator>>,
     pub files: Arc<Mutex<FdTable>>,
+    pub socket_table : Arc<Mutex<SocketTable>>,
     pub fs: Arc<Mutex<FsStatus>>,
     pub vm: Arc<Mutex<MemorySet<PageTableImpl>>>,
     pub sighand: Arc<Mutex<Vec<Option<Box<SigAction>>>>>,
@@ -248,7 +252,7 @@ impl TaskControlBlock {
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(trap_cx_bottom_from_tid(tid)).into())
             .unwrap();
-
+        log::trace!("[TCB::new]trap_cx_ppn{:?}", trap_cx_ppn);
         let task_control_block = Self {
             pid: pid_handle,
             tid,
@@ -264,6 +268,11 @@ impl TaskControlBlock {
                 vec.resize(3, tty);
                 vec
             }))),
+            socket_table: Arc::new(
+                Mutex::new(
+                    SocketTable::new(
+
+            ))),
             fs: Arc::new(Mutex::new(FsStatus {
                 working_inode: Arc::new(
                     ROOT_FD
@@ -306,6 +315,7 @@ impl TaskControlBlock {
             kstack_top,
             trap_handler as usize,
         );
+        trace!("[new] trap_cx:{:?}", *trap_cx);
         task_control_block
     }
 
@@ -447,6 +457,7 @@ impl TaskControlBlock {
             } else {
                 Arc::new(Mutex::new(self.files.lock().clone()))
             },
+            socket_table: Arc::new(Mutex::new(SocketTable::from_another(&self.socket_table.clone().lock()).unwrap())),
             fs: if flags.contains(CloneFlags::CLONE_FS) {
                 self.fs.clone()
             } else {

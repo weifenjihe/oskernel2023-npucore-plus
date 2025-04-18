@@ -1,4 +1,5 @@
 use crate::fs::directory_tree::DirectoryTreeNode;
+use crate::fs::dirent::Dirent;
 use crate::fs::layout::Stat;
 use crate::fs::DiskInodeType;
 use crate::fs::StatMode;
@@ -178,9 +179,9 @@ impl File for Pipe {
         loop {
             let task = current_task().unwrap();
             let inner = task.acquire_inner_lock();
-            if !inner.sigpending.difference(inner.sigmask).is_empty() {
-                return ERESTART as usize;
-            }
+            // if !inner.sigpending.difference(inner.sigmask).is_empty() {
+            //     return ERESTART as usize;
+            // }
             drop(inner);
             drop(task);
             let mut ring = self.buffer.lock();
@@ -220,9 +221,9 @@ impl File for Pipe {
         loop {
             let task = current_task().unwrap();
             let inner = task.acquire_inner_lock();
-            if !inner.sigpending.difference(inner.sigmask).is_empty() {
-                return ERESTART as usize;
-            }
+            // if !inner.sigpending.difference(inner.sigmask).is_empty() {
+            //     return ERESTART as usize;
+            // }
             drop(inner);
             drop(task);
             let mut ring = self.buffer.lock();
@@ -318,9 +319,9 @@ impl File for Pipe {
         loop {
             let task = current_task().unwrap();
             let inner = task.acquire_inner_lock();
-            if !inner.sigpending.difference(inner.sigmask).is_empty() {
-                return ERESTART as usize;
-            }
+            // if !inner.sigpending.difference(inner.sigmask).is_empty() {
+            //     return ERESTART as usize;
+            // }
             drop(inner);
             drop(task);
             let mut ring = self.buffer.lock();
@@ -374,16 +375,11 @@ impl File for Pipe {
         )
     }
 
-    fn get_statx(&self) -> crate::fs::Statx {
-        todo!()
-    }
-
     fn get_file_type(&self) -> DiskInodeType {
-        // DiskInodeType::File
-        DiskInodeType::from_char('-')
+        DiskInodeType::File
     }
 
-    fn info_dirtree_node(&mut self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
+    fn info_dirtree_node(&self, dirnode_ptr: Weak<crate::fs::directory_tree::DirectoryTreeNode>) {
         todo!()
     }
 
@@ -416,7 +412,7 @@ impl File for Pipe {
         todo!()
     }
 
-    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<crate::fs::layout::Dirent> {
+    fn get_dirent(&self, count: usize) -> alloc::vec::Vec<Dirent> {
         todo!()
     }
 

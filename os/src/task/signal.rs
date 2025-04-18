@@ -1,11 +1,13 @@
-use crate::arch::{get_bad_instruction, get_exception_cause};
+use crate::arch::{
+    get_bad_instruction, get_exception_cause, MachineContext, TrapContext, UserContext,
+};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::fmt::{self, Debug, Formatter};
 use core::mem::size_of;
 use log::{debug, error, trace, warn};
 
-use crate::config::*;
+use crate::arch::get_bad_addr;
 use crate::mm::{
     copy_from_user, copy_to_user, translated_ref, translated_refmut, try_get_from_user,
 };
@@ -13,13 +15,13 @@ use crate::syscall::errno::*;
 use crate::task::manager::wait_with_timeout;
 use crate::task::{block_current_and_run_next, exit_current_and_run_next, exit_group_and_run_next};
 use crate::timer::TimeSpec;
-use crate::trap::{get_bad_addr, MachineContext, TrapContext, UserContext};
+use crate::{config::*, signal_type};
 
 use super::current_task;
 
 bitflags! {
     /// Signal
-    pub struct Signals: usize{
+    pub struct Signals: signal_type!(){
         /// Hangup.
         const	SIGHUP		= 1 << ( 0);
         /// Interactive attention signal.
@@ -198,6 +200,16 @@ impl Debug for SigHandler {
     }
 }
 
+#[cfg(feature = "la64")]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct SigAction {
+    pub handler: SigHandler,
+    pub flags: SigActionFlags,
+    pub mask: Signals,
+    pub restorer: usize,
+}
+#[cfg(not(feature = "la64"))]
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct SigAction {
@@ -430,18 +442,25 @@ pub fn do_signal() {
                 // caused by a specific instruction in user program, print log here before exit
                 Signals::SIGILL | Signals::SIGSEGV => {
                     let scause = get_exception_cause();
-                    let stval = if signal == Signals::SIGILL {
-                        get_bad_instruction()
+                    if signal == Signals::SIGILL {
+                        let stval = get_bad_instruction();
+                        warn!("[do_signal] process terminated due to {:?}", signal);
+                        println!(
+                        "[kernel] {:?} in application, instruction addr = {:#x}, bad instruction = {:#x}, core dumped.",
+                        scause,
+                        inner.get_trap_cx().gp.pc,
+                        stval,
+                        );
                     } else {
-                        get_bad_addr()
-                    };
-                    warn!("[do_signal] process terminated due to {:?}", signal);
-                    println!(
+                        let stval = get_bad_addr();
+                        warn!("[do_signal] process terminated due to {:?}", signal);
+                        println!(
                         "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
                         scause,
                         stval,
                         inner.get_trap_cx().gp.pc,
-                    );
+                        );
+                    };
                     drop(inner);
                     drop(sighand);
                     drop(task);
