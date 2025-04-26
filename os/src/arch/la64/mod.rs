@@ -1,4 +1,4 @@
-#[path = "board/2k1000.rs"]
+#[path = "board/qemu.rs"]
 pub mod board;
 pub mod config;
 pub mod laflex;
