@@ -231,6 +231,10 @@ impl VirtIOBlk<'_> {
     pub fn virt_queue_size(&self) -> u16 {
         self.queue.size()
     }
+    /// Returns the capacity of the block device.
+    pub fn get_capacity(&self) -> usize {
+        self.capacity
+    }
 }
 
 #[repr(C)]

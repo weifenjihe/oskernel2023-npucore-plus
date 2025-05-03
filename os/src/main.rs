@@ -74,6 +74,8 @@ pub fn rust_main() -> isize {
     machine_init();
     println!("[kernel] Hello, world!");
 
+    // use crate::drivers::block::block_device_test;
+    // block_device_test();
     //machine independent initialization
     fs::directory_tree::init_fs();
     #[cfg(feature = "comp")]

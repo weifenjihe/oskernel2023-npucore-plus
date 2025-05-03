@@ -8,5 +8,9 @@
 		"./os/Cargo.toml",
 		"./user/Cargo.toml",
 	],
-	"cmake.ignoreCMakeListsMissing": true
+	"cmake.ignoreCMakeListsMissing": true,
+	"files.associations": {
+		"*.cpp": "cpp",
+		"string.h": "c"
+	}
 }

@@ -1,13 +1,16 @@
 use super::BlockDevice;
 use crate::mm::{
-    frame_alloc, frame_dealloc, kernel_token, FrameTracker, PageTable, PageTableImpl, PhysAddr,
-    PhysPageNum, StepByOne, VirtAddr,
+    frame_alloc, frame_dealloc, kernel_token, FrameTracker, PageTable,  PageTableImpl,
+    PhysAddr, PhysPageNum, StepByOne, VirtAddr,
 };
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
 use spin::Mutex;
 use virtio_drivers::{VirtIOBlk, VirtIOHeader};
+
 const VIRT_IO_BLOCK_SZ: usize = 512;
+const BLOCK_SIZE: usize = 1024; // ext4 块大小
+
 #[allow(unused)]
 const VIRTIO0: usize = 0x10001000;
 
@@ -27,6 +30,7 @@ impl BlockDevice for VirtIOBlock {
             block_id += 1;
         }
     }
+
     fn write_block(&self, mut block_id: usize, buf: &[u8]) {
         for buf in buf.chunks(VIRT_IO_BLOCK_SZ) {
             self.0
@@ -39,26 +43,28 @@ impl BlockDevice for VirtIOBlock {
 }
 
 impl lwext4_rs::BlockDeviceInterface for VirtIOBlock {
-    fn read_block(&mut self, buf: &mut [u8],mut  block_id: u64, block_count: u32) -> lwext4_rs::Result<usize> {
-        block_id = block_id * (1024 as u64 / 512 as u64);
-        for buf in buf.chunks_mut(512) {
-            self.0
-                .lock()
-                .read_block(block_id as usize, buf);
+    fn read_block(&mut self, buf: &mut [u8], mut block_id: u64, _block_count: u32) -> lwext4_rs::Result<usize> {
+        block_id *= (BLOCK_SIZE / VIRT_IO_BLOCK_SZ) as u64;
+        let mut count = 0;
+        for chunk in buf.chunks_mut(VIRT_IO_BLOCK_SZ) {
+            self.0.lock().read_block(block_id as usize, chunk)
+                .expect("VirtIOBlk read failed");
             block_id += 1;
+            count += 1;
         }
-        Ok(0)
+        Ok(count)
     }
 
-    fn write_block(&mut self, buf: &[u8],mut block_id: u64, block_count: u32) -> lwext4_rs::Result<usize> {
-        block_id = block_id * (1024 as u64 / 512 as u64);
-        for buf in buf.chunks(512) {
-            self.0
-                .lock()
-                .write_block(block_id as usize, buf);
+    fn write_block(&mut self, buf: &[u8], mut block_id: u64, _block_count: u32) -> lwext4_rs::Result<usize> {
+        block_id *= (BLOCK_SIZE / VIRT_IO_BLOCK_SZ) as u64;
+        let mut count = 0;
+        for chunk in buf.chunks(VIRT_IO_BLOCK_SZ) {
+            self.0.lock().write_block(block_id as usize, chunk)
+                .expect("VirtIOBlk write failed");
             block_id += 1;
+            count += 1;
         }
-        Ok(0)
+        Ok(count)
     }
 
     fn close(&mut self) -> lwext4_rs::Result<()> {
@@ -66,11 +72,16 @@ impl lwext4_rs::BlockDeviceInterface for VirtIOBlock {
     }
 
     fn open(&mut self) -> lwext4_rs::Result<lwext4_rs::BlockDeviceConfig> {
+        let dev = self.0.lock();
+        let capacity_512_blocks = dev.get_capacity();
+        let block_size = BLOCK_SIZE;
+        let capacity_blocks = capacity_512_blocks / (block_size / VIRT_IO_BLOCK_SZ);
+
         Ok(lwext4_rs::BlockDeviceConfig {
-            block_size: 1024 as u32,
-            block_count: 999,
-            part_size: 1024 as u64 * 2,
-            part_offset: 0
+            block_size: block_size as u32,
+            block_count: capacity_blocks as u64,
+            part_size: (capacity_blocks * block_size) as u64,
+            part_offset: 0,
         })
     }
 

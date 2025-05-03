@@ -259,6 +259,22 @@ impl UserBuffer {
             buffer.fill(0);
         })
     }
+
+    /// 将 UserBuffer 内所有片段连接起来返回一个 Vec<u8>
+    /// 注意：如果内存段不连续，则必须拷贝数据
+    #[allow(dead_code)]
+    pub fn into_contiguous_vec(self) -> Vec<u8> {
+        let mut vec = Vec::with_capacity(self.len);
+        for buffer in self.buffers {
+            vec.extend_from_slice(buffer);
+        }
+        vec
+    }
+    
+    /// 如果你只需要第一个片段的可变引用，可以这样实现
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        self.buffers.first_mut().map(|slice| &mut **slice).unwrap_or(&mut [])
+    }
 }
 
 //There may be better implementations here to cover more types
