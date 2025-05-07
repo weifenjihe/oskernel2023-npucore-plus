@@ -1,0 +1,15 @@
+.vscode
+
+os/target/
+
+user/target/
+
+fs-img-dir
+
+kernel-la
+
+kernel-rv
+
+sdcard-la.img
+
+sdcard-rv.img
