@@ -52,6 +52,7 @@ impl Ext4BlockGroup {
         // 这里因为BLOCK_SIZE是2048,而块组描述符大小为64
         // 所以一个块可以放32个块组描述符
         let block_size = *GLOBAL_BLOCK_SIZE;
+        // println!("block_size: {}", block_size);
         let dsc_cnt = block_size / super_block.desc_size as usize;
         // 计算块组描述符在第几个块
         let dsc_id = block_group_idx / dsc_cnt;
@@ -66,6 +67,7 @@ impl Ext4BlockGroup {
         let offset = (block_group_idx % dsc_cnt) * super_block.desc_size as usize;
         // 从块设备读取块
         let ext4block = Block::load_offset(block_device, block_id * block_size);
+        // println!("ext4block: {:?}", ext4block.data);
         // 使用Block的read_offset_as方法将数据读取为Ext4BlockGroup
         let bg: Ext4BlockGroup = ext4block.read_offset_as(offset);
         bg
@@ -315,10 +317,10 @@ impl Block {
     /// 加载超级块
     pub fn load_superblock(block_device: Arc<dyn BlockDevice>, offset: usize) -> Self {
         // 暂时使用2048代替
-        let block_size = 2048;
+        let block_size = 4096;
         let block_id = offset / block_size;
         // Self::load_id(block_device, block_id, offset)
-        let mut buf = [0u8; 2048];
+        let mut buf = [0u8; 4096];
         block_device.read_block(block_id, &mut buf);
         let data = buf.to_vec();
         Block {
@@ -331,6 +333,7 @@ impl Block {
     #[no_mangle]
     pub fn load_id(block_device: Arc<dyn BlockDevice>, block_id: usize, offset: usize) -> Self {
         let mut buf = vec![0u8; *GLOBAL_BLOCK_SIZE];
+        // println!("load id block_id: {} offset: {}", block_id, offset);
         block_device.read_block(block_id, &mut buf);
         let data = buf.to_vec();
         Block {
@@ -352,6 +355,7 @@ impl Block {
         // }
         let block_size = *GLOBAL_BLOCK_SIZE;
         let block_id = offset / block_size;
+        // println!("block_id: {} offset: {}", block_id, offset);
         Self::load_id(block_device, block_id, offset)
     }
 
@@ -384,7 +388,7 @@ impl Block {
 
     pub fn read_offset_as_superblock(&self, offset: usize) -> Ext4Superblock {
         // 暂时先使用2048
-        let block_size = 2048;
+        let block_size = 4096;
         unsafe {
             let offset = offset % block_size;
             let ptr = self.data.as_ptr().add(offset) as *const Ext4Superblock;

@@ -306,20 +306,21 @@ impl DirectoryTreeNode {
         log::debug!("[open]: cwd: {}, path: {}", self.get_cwd(), path);
         // println!("open file in dtn: cwd: {} name: {}",self.get_cwd(), path );
 
-        const BUSYBOX_PATH: &str = "/busybox";
-        const REDIRECT_TO_BUSYBOX: [&str; 4] = ["/touch", "/rm", "/ls", "/grep"];
+        const BUSYBOX_PATH: &str = "/musl/busybox";
+        const REDIRECT_TO_BUSYBOX: [&str; 5] = ["/touch", "/rm", "/ls", "/grep","/cp"];
         let path = if REDIRECT_TO_BUSYBOX.contains(&path) {
             BUSYBOX_PATH
         } else {
             path
         };
-        const LIBC_PATH: &str = "/lib/libc.so";
+        const LIBC_PATH: &str = "/musl/lib/libc.so";
         const REDIRECT_TO_LIBC: [&str; 3] = [
             "/lib/ld-musl-riscv64.so.1",
             "/lib/ld-musl-riscv64-sf.so.1",
             "/lib/ld-linux-riscv64-lp64d.so.1",
         ];
         let path = if REDIRECT_TO_LIBC.contains(&path) {
+            println!("use libc.so");
             LIBC_PATH
         } else {
             path

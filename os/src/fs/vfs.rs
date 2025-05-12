@@ -51,6 +51,7 @@ impl VFS {
         index_cache_mgr: Arc<spin::Mutex<BlockCacheManager>>,
     ) -> Arc<Self> {
         let fs_type = pre_mount();
+        println!("[fs] fs_type: {:?}", fs_type);
         match fs_type {
             FS_Type::Fat32 => EasyFileSystem::open(block_device, index_cache_mgr),
             // FS_Type::Ext4 => Ext4FileSystem::open(block_device, index_cache_mgr),

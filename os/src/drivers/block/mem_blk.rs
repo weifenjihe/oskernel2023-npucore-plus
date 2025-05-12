@@ -35,6 +35,7 @@ impl BlockDevice for MemBlockWrapper {
     /// 此处buf长度需要考虑对齐吗？
     fn read_block(&self, block_id: usize, buf: &mut [u8]) {
         info!("[mem read_block] len : {}", buf.len());
+        print!("[mem read_block] block_id : {}", block_id);
         let blk = self.0.lock();
         buf.copy_from_slice(blk.block_ref(block_id, buf.len()));
     }

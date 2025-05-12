@@ -1,4 +1,5 @@
 use crate::config::PAGE_SIZE;
+use crate::console::print;
 use crate::drivers::block::BlockDevice;
 use crate::hal::BLOCK_SZ;
 use crate::mm::{frame_alloc, frame_dealloc, PhysAddr};
@@ -19,6 +20,7 @@ impl SataBlock {
 
 impl BlockDevice for SataBlock {
     fn read_block(&self, mut block_id: usize, buf: &mut [u8]) {
+        print!("[sata read_block] len ");
         // 内核BLOCK_SZ为2048，SATA驱动中BLOCK_SIZE为512，四倍转化关系
         block_id = block_id * (BLOCK_SZ / BLOCK_SIZE);
         for buf in buf.chunks_mut(BLOCK_SIZE) {
