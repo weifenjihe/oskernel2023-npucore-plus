@@ -314,10 +314,11 @@ impl DirectoryTreeNode {
             path
         };
         const LIBC_PATH: &str = "/musl/lib/libc.so";
-        const REDIRECT_TO_LIBC: [&str; 3] = [
+        const REDIRECT_TO_LIBC: [&str; 4] = [
             "/lib/ld-musl-riscv64.so.1",
             "/lib/ld-musl-riscv64-sf.so.1",
             "/lib/ld-linux-riscv64-lp64d.so.1",
+            "/lib/ld-linux-riscv64-lp64.so.1",
         ];
         let path = if REDIRECT_TO_LIBC.contains(&path) {
             println!("use libc.so");
@@ -426,7 +427,6 @@ impl DirectoryTreeNode {
         if path.starts_with('/') && path != path_cache_lock.0 {
             *path_cache_lock = (path.to_string(), Arc::downgrade(&inode.get_arc()));
         }
-
         Ok(inode.file.open(flags, special_use))
     }
 
