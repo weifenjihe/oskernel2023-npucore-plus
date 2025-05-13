@@ -172,6 +172,11 @@ impl DirectoryTreeNode {
         self.selfptr.lock().upgrade().unwrap().clone()
     }
 
+    pub fn father_arc(&self) -> Arc<Self> {
+        let lock = self.father.lock().clone();
+        lock.upgrade().unwrap()
+    }
+
     /// 解析路径
     /// # 参数
     /// + path: 路径
@@ -509,7 +514,10 @@ impl DirectoryTreeNode {
             return Err(ENOTDIR);
         }
 
-        match inode.father.lock().upgrade() {
+        match {
+            let father_weak = inode.father.lock().clone();
+            father_weak.upgrade()
+        } {
             Some(par_inode) => {
                 let mut lock = par_inode.children.write();
                 match inode.file.unlink(true) {

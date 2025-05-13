@@ -570,39 +570,60 @@ impl File for Ext4OSInode {
 
     // remove file
     fn unlink(&self, delete: bool) -> Result<(), isize> {
+        // 先读取自己的 inode，检查是不是非空目录
         let inode_ref = self.inode.lock();
-        // 若为非空目录
         if inode_ref.inode.get_file_type() == DiskInodeType::Directory
             && self.ext4fs.dir_has_entry(inode_ref.inode_num)
         {
+            // 非空目录不能删除
             return Err(ENOTEMPTY);
         }
-        // 若为空目录
-        if inode_ref.inode.get_file_type() == DiskInodeType::Directory {
-            let self_dir_tree_node = &self.dirnode_ptr.lock();
-            let parent_dirtreenode = self_dir_tree_node.upgrade().unwrap();
-            let parent_osinode = &parent_dirtreenode.file;
-            let parent = Arc::downcast::<Ext4OSInode>(parent_osinode.clone()).unwrap();
-            let mut parent_inode_ref = parent.inode.lock();
-            let mut child_inode_ref = self.ext4fs.get_inode_ref(inode_ref.inode_num);
+        // 记录一下要删除的 inode 编号和类型
+        let ino = inode_ref.inode_num;
+        let is_dir = inode_ref.inode.get_file_type() == DiskInodeType::Directory;
+        drop(inode_ref); // 一旦记录完信息就释放自锁，后面再按需锁父/子 inode
+
+        // 找到自己在目录树中的节点，以及父目录 inode
+        let dir_node_weak = self.dirnode_ptr.lock().clone();
+        let dir_node = dir_node_weak.upgrade().ok_or(ENOTEMPTY)?;
+
+        let father_inode = dir_node.father_arc();
+        let parent_osinode = &father_inode.file;
+        println!("[kernel in unlink] parent osinode: {:?}", parent_osinode.get_file_type());
+        let parent = Arc::downcast::<Ext4OSInode>(parent_osinode.clone())
+            .map_err(|_| ENOTEMPTY)?;
+        let mut parent_inode_ref = parent.inode.lock();
+
+        // 拿到要删除的 child inode 引用
+        let mut child_inode_ref = self.ext4fs.get_inode_ref(ino);
+
+        // 如果需要释放数据块，就先把大小截断到 0
+        if delete {
             self.ext4fs.truncate_inode(&mut child_inode_ref, 0)?;
-            // TODO:
-            // This maybe wrong
-            println!(
-                "[kernel in unlink] unlink name: {:?}",
-                self_dir_tree_node.upgrade().unwrap().name
-            );
-            self.ext4fs.unlink(
-                &mut parent_inode_ref,
-                &mut child_inode_ref,
-                self_dir_tree_node.upgrade().unwrap().name.as_str(),
-            );
-            self.ext4fs.write_back_inode(&mut parent_inode_ref);
         }
-        // 若为常规文件
-        println!("did not support unlink for now!");
-        todo!()
+
+        // 打印日志，执行 unlink（删除目录项并更新 link_count）
+        println!(
+            "[kernel in unlink] removing {} {:?}",
+            dir_node.name,
+            if is_dir { "directory" } else { "file" }
+        );
+        self.ext4fs.unlink(
+            &mut parent_inode_ref,
+            &mut child_inode_ref,
+            dir_node.name.as_str(),
+        );
+
+        // 写回父 inode
+        self.ext4fs.write_back_inode(&mut parent_inode_ref);
+        // 若释放了数据块，也要写回子 inode
+        if delete {
+            self.ext4fs.write_back_inode(&mut child_inode_ref);
+        }
+
+        Ok(())
     }
+
 
     /// 获取目录项
     /// # 参数
