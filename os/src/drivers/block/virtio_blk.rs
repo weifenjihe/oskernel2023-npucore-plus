@@ -1,8 +1,8 @@
 use super::BlockDevice;
-use crate::{console::print, mm::{
+use crate::mm::{
     frame_alloc, frame_dealloc, kernel_token, FrameTracker, PageTable, PageTableImpl, PhysAddr,
     PhysPageNum, StepByOne, VirtAddr,
-}};
+};
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
 use spin::Mutex;
@@ -10,7 +10,6 @@ use virtio_drivers::{VirtIOBlk, VirtIOHeader};
 const VIRT_IO_BLOCK_SZ: usize = 512;
 use crate::hal::BLOCK_SZ;
 const BLOCK_RATIO: usize = BLOCK_SZ / VIRT_IO_BLOCK_SZ;
-// const VIRT_IO_BLOCK_SZ: usize = 2048;
 #[allow(unused)]
 const VIRTIO0: usize = 0x10001000;
 
@@ -34,13 +33,11 @@ impl BlockDevice for VirtIOBlock {
         //     block_id += 1;
         for (i, chunk) in buf.chunks_mut(VIRT_IO_BLOCK_SZ).enumerate() {
             let virtio_block_id = block_id * BLOCK_RATIO + i;
-            // println!("[virtio read_block] virtio_block_id: {}", virtio_block_id);
             self.0
                 .lock()
                 .read_block(virtio_block_id, chunk)
                 .expect("Error when reading VirtIOBlk");
         }
-        // println!("[virtio read_block] buf: {:?}", buf);
     }
     fn write_block(&self, block_id: usize, buf: &[u8]) {
         assert!(

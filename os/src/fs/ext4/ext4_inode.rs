@@ -579,11 +579,11 @@ impl InodeTrait for Ext4Inode {
     }
 
     fn is_dir(&self) -> bool {
-        todo!()
+        self.file_type() == InodeFileType::S_IFDIR
     }
 
     fn is_file(&self) -> bool {
-        todo!()
+        self.file_type() == InodeFileType::S_IFREG
     }
 
     fn get_inode_num_lock(
@@ -836,8 +836,9 @@ impl Ext4FileSystem {
     /// 从磁盘加载inoderef对象
     pub fn get_inode_ref(&self, inode_num: u32) -> Ext4InodeRef {
         let offset = self.inode_disk_pos(inode_num);
-
         let mut ext4block = Block::load_offset(self.block_device.clone(), offset);
+        // println!("[kernel] ext4block.diskoffset is {:?}", ext4block.disk_offset);
+        // println!("[kernel] ext4block.data is {:?}", ext4block.data);
         let blk_offset = offset % self.block_size;
         let inode: &mut Ext4Inode = ext4block.read_offset_as_mut(offset % self.block_size);
         Ext4InodeRef {
@@ -876,7 +877,7 @@ impl Ext4FileSystem {
     /// 不带校验和回写inode信息
     pub fn write_back_inode_without_csum(&self, inode_ref: &Ext4InodeRef) {
         let inode_pos = self.inode_disk_pos(inode_ref.inode_num);
-        println!("[kernel write_back_inode_without_csum] inode_pos: {:?}, inode_num: {}", inode_pos, inode_ref.inode_num);
+        //println!("[kernel write_back_inode_without_csum] inode_pos: {:?}, inode_num: {}", inode_pos, inode_ref.inode_num);
 
         inode_ref
             .inode
@@ -925,7 +926,7 @@ impl Ext4FileSystem {
         let mut block_bmap_raw_data = [0u8; BLOCK_SIZE];
         self.block_device
             .read_block(block_bitmap_block as usize, &mut block_bmap_raw_data);
-        let mut data: &mut Vec<u8> = &mut block_bmap_raw_data.to_vec();
+        let data: &mut Vec<u8> = &mut block_bmap_raw_data.to_vec();
         let mut rel_blk_idx = 0;
 
         ext4_bmap_bit_find_clr(data, index, 0x8000, &mut rel_blk_idx);

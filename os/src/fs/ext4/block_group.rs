@@ -48,11 +48,7 @@ impl Ext4BlockGroup {
         super_block: &Ext4Superblock,
         block_group_idx: usize,
     ) -> Self {
-        // 计算一个块可以放多少块组描述符
-        // 这里因为BLOCK_SIZE是2048,而块组描述符大小为64
-        // 所以一个块可以放32个块组描述符
         let block_size = *GLOBAL_BLOCK_SIZE;
-        // println!("block_size: {}", block_size);
         let dsc_cnt = block_size / super_block.desc_size as usize;
         // 计算块组描述符在第几个块
         let dsc_id = block_group_idx / dsc_cnt;
@@ -67,12 +63,47 @@ impl Ext4BlockGroup {
         let offset = (block_group_idx % dsc_cnt) * super_block.desc_size as usize;
         // 从块设备读取块
         let ext4block = Block::load_offset(block_device, block_id * block_size);
-        // println!("ext4block: {:?}", ext4block.data);
+        //print_hex(&ext4block.data);
         // 使用Block的read_offset_as方法将数据读取为Ext4BlockGroup
         let bg: Ext4BlockGroup = ext4block.read_offset_as(offset);
         bg
     }
 }
+
+pub fn print_hex(data: &[u8]) {
+    let mut offset = 0;
+    while offset < data.len() {
+        // 每行16字节
+        let line = &data[offset..(offset + 16).min(data.len())];
+
+        // 打印偏移
+        print!("{:08x}  ", offset);
+
+        // 打印十六进制部分
+        for i in 0..16 {
+            if i < line.len() {
+                print!("{:02x} ", line[i]);
+            } else {
+                print!("   "); // 不足16字节时补空格
+            }
+
+            if i == 7 {
+                print!(" "); // 中间空一格
+            }
+        }
+
+        // 打印ASCII部分
+        print!(" |");
+        for &b in line {
+            let c = if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' };
+            print!("{}", c);
+        }
+        println!("|");
+
+        offset += 16;
+    }
+}
+
 
 impl Ext4BlockGroup {
     /// 获取块组的块位图块号
@@ -316,7 +347,6 @@ pub struct Block {
 impl Block {
     /// 加载超级块
     pub fn load_superblock(block_device: Arc<dyn BlockDevice>, offset: usize) -> Self {
-        // 暂时使用2048代替
         let block_size = 4096;
         let block_id = offset / block_size;
         // Self::load_id(block_device, block_id, offset)
@@ -333,7 +363,6 @@ impl Block {
     #[no_mangle]
     pub fn load_id(block_device: Arc<dyn BlockDevice>, block_id: usize, offset: usize) -> Self {
         let mut buf = vec![0u8; *GLOBAL_BLOCK_SIZE];
-        // println!("load id block_id: {} offset: {}", block_id, offset);
         block_device.read_block(block_id, &mut buf);
         let data = buf.to_vec();
         Block {
@@ -346,16 +375,8 @@ impl Block {
     /// + 通过 offset/BLOCK_SIZE 获取 block_id 也即块号
     /// + 然后调用load_id
     pub fn load_offset(block_device: Arc<dyn BlockDevice>, offset: usize) -> Self {
-        // let mut buf = [0u8; BLOCK_SIZE];
-        // block_device.read_block(offset, &mut buf);
-        // let data = buf.to_vec();
-        // Block {
-        //     disk_offset: offset,
-        //     data,
-        // }
         let block_size = *GLOBAL_BLOCK_SIZE;
         let block_id = offset / block_size;
-        // println!("block_id: {} offset: {}", block_id, offset);
         Self::load_id(block_device, block_id, offset)
     }
 

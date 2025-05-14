@@ -53,10 +53,6 @@ impl Ext4FileSystem {
         let block = Block::load_superblock(block_device.clone(), 0);
         let superblock = block.read_offset_as_superblock(SUPERBLOCK_OFFSET);
         let block_size = superblock.clone().block_size() as usize;
-        println!(
-            "[kernel ext4fs] block size: {}",
-            block_size
-        );
         let cache_mgr = index_cache_mgr.clone();
         let ext4fs = Ext4FileSystem {
             block_device,

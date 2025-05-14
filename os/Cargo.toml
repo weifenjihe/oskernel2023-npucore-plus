@@ -26,8 +26,8 @@ riscv = { path = "../dependency/riscv", features = ["inline-asm"] }
 rustsbi = { path = "../dependency/rustsbi" }
 
 # [target.'cfg(target_arch = "loongarch64")'.dependencies]
-pci = { git = "https://github.com/huayuntao/dep_pci.git" }
-isomorphic_drivers = { git = "https://github.com/huayuntao/dep_iso.git" }
+pci = {  path = "../dependency/dep_pci/pci"  }
+isomorphic_drivers = { path = "../dependency/dep_iso" }
 
 smoltcp = { version = "0.10.0", default-features = false, features = [
     "alloc",

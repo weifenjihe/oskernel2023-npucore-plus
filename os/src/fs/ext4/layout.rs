@@ -500,9 +500,9 @@ impl File for Ext4OSInode {
 
         let inode_ref = self.inode.lock();
         let mut parent_inode_num = inode_ref.inode_num.clone();
-        println!("self(parent) inode num:{:?} self(parent) name:{:?}", parent_inode_num, inode_ref);
+        //println!("self(parent) inode num:{:?} self(parent) name:{:?}", parent_inode_num, inode_ref);
         let mut nameoff = 0;
-        println!("in here!!!???");
+        //println!("in here!!!???");
         if inode_mode == InodeFileType::S_IFDIR.bits() {
             let new_inode_num = self.ext4fs.generic_open(
                 name,
@@ -511,10 +511,10 @@ impl File for Ext4OSInode {
                 inode_mode,
                 &mut nameoff,
             );
-            println!("inhere???");
+            //println!("inhere???");
             if let Ok(new_inode_num) = new_inode_num {
                 let new_inode_ref = self.ext4fs.get_inode_ref(new_inode_num);
-                println!("new_inode_ref:{:#?}", new_inode_ref);
+                //println!("new_inode_ref:{:#?}", new_inode_ref);
                 return Ok(Arc::new(Self {
                     inode_lock: Arc::new(RwLock::new(InodeLock {})),
                     readable: true,
@@ -532,17 +532,17 @@ impl File for Ext4OSInode {
                 panic!()
             }
         }
-        println!("[kernel] name={} inode_mode={}", name, inode_mode);
+        //println!("[kernel] name={} inode_mode={}", name, inode_mode);
         let inode_perm = (InodePerm::S_IREAD | InodePerm::S_IWRITE).bits();
-        println!("[kernel] inode_perm = {}", inode_perm);
+        //println!("[kernel] inode_perm = {}", inode_perm);
         let new_inode_ref = self
             .ext4fs
             // .create(self.inode.inode_num, name, inode_mode | inode_perm);
             .create(parent_inode_num, name, inode_mode | inode_perm);
         // xein TODO: 此处有问题
-        println!("cre1");
+        //println!("cre1");
         if let Ok(inode_ref) = new_inode_ref {
-            println!("Successfully here");
+            //println!("Successfully here");
             return Ok(Arc::new(Self {
                 inode_lock: Arc::new(RwLock::new(InodeLock {})),
                 readable: true,
@@ -570,60 +570,47 @@ impl File for Ext4OSInode {
 
     // remove file
     fn unlink(&self, delete: bool) -> Result<(), isize> {
-        // 先读取自己的 inode，检查是不是非空目录
-        let inode_ref = self.inode.lock();
-        if inode_ref.inode.get_file_type() == DiskInodeType::Directory
-            && self.ext4fs.dir_has_entry(inode_ref.inode_num)
+        let inode_num = self.inode.lock().inode_num;
+        let file_type = self.inode.lock().inode.get_file_type();
+
+        // 如果是非空目录，返回错误
+        if file_type == DiskInodeType::Directory
+            && self.ext4fs.dir_has_entry(inode_num)
         {
-            // 非空目录不能删除
             return Err(ENOTEMPTY);
         }
-        // 记录一下要删除的 inode 编号和类型
-        let ino = inode_ref.inode_num;
-        let is_dir = inode_ref.inode.get_file_type() == DiskInodeType::Directory;
-        drop(inode_ref); // 一旦记录完信息就释放自锁，后面再按需锁父/子 inode
 
-        // 找到自己在目录树中的节点，以及父目录 inode
-        let dir_node_weak = self.dirnode_ptr.lock().clone();
-        let dir_node = dir_node_weak.upgrade().ok_or(ENOTEMPTY)?;
+        // 先获取当前目录树节点，避免持锁后再调用 parent()
+        let current_node = self.dirnode_ptr.lock().upgrade().unwrap();
 
-        let father_inode = dir_node.father_arc();
-        let parent_osinode = &father_inode.file;
-        println!("[kernel in unlink] parent osinode: {:?}", parent_osinode.get_file_type());
-        let parent = Arc::downcast::<Ext4OSInode>(parent_osinode.clone())
-            .map_err(|_| ENOTEMPTY)?;
+        // 获取父目录节点（避免死锁）
+        let parent_node = current_node.parent(); 
+        let parent_file = parent_node.file.clone();
+        let parent = Arc::downcast::<Ext4OSInode>(parent_file).unwrap();
         let mut parent_inode_ref = parent.inode.lock();
 
-        // 拿到要删除的 child inode 引用
-        let mut child_inode_ref = self.ext4fs.get_inode_ref(ino);
+        // 重新获取子 inode，避免持锁冲突
+        let mut child_inode_ref = self.ext4fs.get_inode_ref(inode_num);
 
-        // 如果需要释放数据块，就先把大小截断到 0
-        if delete {
+        // 文件名
+        let name = current_node.name.clone();
+
+        // 如果是目录
+        if file_type == DiskInodeType::Directory {
             self.ext4fs.truncate_inode(&mut child_inode_ref, 0)?;
+            //println!("[kernel unlink] unlink dir name: {:?}", name);
+            self.ext4fs.unlink(&mut parent_inode_ref, &mut child_inode_ref, name.as_str());
+            self.ext4fs.write_back_inode(&mut parent_inode_ref);
+            return Ok(());
         }
 
-        // 打印日志，执行 unlink（删除目录项并更新 link_count）
-        println!(
-            "[kernel in unlink] removing {} {:?}",
-            dir_node.name,
-            if is_dir { "directory" } else { "file" }
-        );
-        self.ext4fs.unlink(
-            &mut parent_inode_ref,
-            &mut child_inode_ref,
-            dir_node.name.as_str(),
-        );
-
-        // 写回父 inode
+        // 如果是常规文件
+        //println!("[kernel unlink] unlink file name: {:?}", name);
+        self.ext4fs.unlink(&mut parent_inode_ref, &mut child_inode_ref, name.as_str());
         self.ext4fs.write_back_inode(&mut parent_inode_ref);
-        // 若释放了数据块，也要写回子 inode
-        if delete {
-            self.ext4fs.write_back_inode(&mut child_inode_ref);
-        }
 
         Ok(())
     }
-
 
     /// 获取目录项
     /// # 参数
@@ -847,10 +834,10 @@ impl Ext4OSInode {
         let blk_cnts = (file_size + byts_per_blk - 1) / byts_per_blk;
         for _ in 0..blk_per_cache {
             if blk_id >= blk_cnts {
-                println!(
-                    "[kernel in get_neighboring_blk] blk_id is out of bound, blk_id: {}, blk_cnts: {}",
-                    blk_id, blk_cnts
-                );
+                // println!(
+                //     "[kernel in get_neighboring_blk] blk_id is out of bound, blk_id: {}, blk_cnts: {}",
+                //     blk_id, blk_cnts
+                // );
                 break;
             }
             // 获取物理块号
